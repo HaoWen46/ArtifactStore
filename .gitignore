@@ -1,0 +1,32 @@
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+*.egg-info/
+artifactstore.egg-info/
+build/
+dist/
+
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+.DS_Store
+.idea/
+.vscode/
+
+eval/runs/
+artifactstore_data/
+
+# Claude Code local-only settings
+.claude/settings.local.json
+
+# Sub-cloned reference repos carry their own .git — don't track them
+notes/references/*/

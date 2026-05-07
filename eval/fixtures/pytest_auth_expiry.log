@@ -1,0 +1,31 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.7, pytest-8.2.0, pluggy-1.5.0
+rootdir: /Users/dev/example-app
+collected 47 items
+
+tests/test_login.py ..........                                            [ 21%]
+tests/test_refresh.py ........                                            [ 38%]
+tests/test_auth.py .....F.....                                            [ 61%]
+tests/test_session.py ............                                        [ 87%]
+tests/test_oauth.py ......                                                [100%]
+
+=================================== FAILURES ===================================
+______________________________ test_auth_expiry _______________________________
+
+self = <tests.test_auth.TestAuthExpiry object at 0x10e1c2d50>
+
+    def test_auth_expiry(self):
+        token = mint_token(user_id=42, ttl_seconds=3600)
+        # advance the clock by 30 minutes; token should still be valid
+        with freeze_time(datetime.now() + timedelta(minutes=30)):
+>           assert validate_token(token) is True, "token expired prematurely"
+E           AssertionError: token expired prematurely
+E           assert False is True
+E            +  where False = validate_token('eyJhbGciOi...truncated...')
+
+tests/test_auth.py:84: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  app.auth:auth.py:117 token rejected: now=2026-05-07T08:30:00 exp=2026-05-07T01:00:00+00:00
+=========================== short test summary info ============================
+FAILED tests/test_auth.py::TestAuthExpiry::test_auth_expiry - AssertionError: token expired prematurely
+========================= 1 failed, 46 passed in 2.41s =========================

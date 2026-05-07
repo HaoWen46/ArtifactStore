@@ -816,3 +816,119 @@ Use this as the concise pitch:
 > **ArtifactStore is a scoped evidence substrate for tool-using AI agents. It replaces transcript dumping with typed, indexed, permission-scoped artifacts, allowing supervisors and subagents to recover exact tool-result evidence under token and access constraints.**
 
 That is the cleanest version.
+
+---
+
+## 20. Demo agent design
+
+The evaluations in §11 require a real, runnable supervisor/subagent harness. We deliberately keep this **small** — the demo's job is to show ArtifactStore working end-to-end, not to advance agent-framework state of the art. Anything fancier than what is below dilutes the contribution.
+
+### 20.1 Stack
+
+```text
+Anthropic Messages API           (Python SDK)
+client-side tool use loop        (~150 LOC, in demo/agent.py)
+no MCP, no async-everywhere
+no router, no planner, no scratchpad memory beyond message history
+```
+
+Reference implementation studied: `anthropic/anthropic-quickstarts/agents` (MIT). We adapt the `Tool` dataclass + parallel `execute_tools` pattern. Notes in `notes/agent_design.md`.
+
+### 20.2 Two-agent topology
+
+```text
+                ┌──────────────────────────┐
+                │ Supervisor (Claude)      │
+                │ tools:                   │
+                │   run_workload(target)   │  ──► writes artifact via put_artifact
+                │   create_grant(...)      │
+                │   delegate(task, grant)  │  ──► spawns subagent loop
+                │   expand_artifact(view)  │  ──► verifies citations
+                └─────────────┬────────────┘
+                              │ grant_id only (no transcript)
+                              ▼
+                ┌──────────────────────────┐
+                │ Subagent (Claude)        │
+                │ tools (gated by grant):  │
+                │   artifact_search        │
+                │   artifact_get_spans     │
+                │   artifact_expand_view   │
+                │   artifact_find_related  │
+                │   submit_report          │  ──► terminates the loop
+                └──────────────────────────┘
+```
+
+Hard rules:
+- The subagent never receives the supervisor's message history. The only handle is `grant_id`.
+- `grant_id` is **bound at tool construction time**, not exposed as a tool parameter. The model never sees it. The harness enforces scope, not the LLM.
+- Every read flows through `ArtifactStore.*`, which writes to `artifact_access_log`. The audit log is the RQ4 measurement surface — do not bypass it for "performance".
+- After the subagent returns, the supervisor verifies each citation by calling `expand_artifact` on the cited `artifact_id/span_id`. Unresolvable citations → report rejected.
+
+### 20.3 Agent loop (canonical, per Anthropic docs)
+
+```python
+while True:
+    resp = client.messages.create(model=..., system=..., tools=[...],
+                                  messages=messages)
+    messages.append({"role": "assistant", "content": resp.content})
+    if resp.stop_reason != "tool_use":
+        break
+    results = [exec_tool(b) for b in resp.content if b.type == "tool_use"]
+    messages.append({"role": "user", "content": results})  # tool_results FIRST
+return resp
+```
+
+Pitfalls already encoded in `demo/agent.py`:
+- `tool_result` blocks come first in the next user message; text after.
+- Every `tool_use_id` gets a matching `tool_result` (use `is_error: true` on failure with a useful hint).
+- `submit_report` is forced via `tool_choice` once the subagent has run more than N turns, so the loop terminates predictably for eval runs.
+
+### 20.4 What runs where
+
+`demo/` layout:
+
+```text
+demo/
+  agent.py     # Tool, ModelConfig, Agent.run() — generic Claude loop
+  tools.py     # subagent_tools(store, grant_id), supervisor_tools(...)
+  prompts.py   # SUPERVISOR_SYSTEM, SUBAGENT_SYSTEM
+  runner.py    # `python -m demo.runner --fixture pytest.log` end-to-end demo
+```
+
+The supervisor's `run_workload` is **stubbed for the demo**: it reads a fixture file (a real pytest log captured offline) instead of executing pytest live. This makes runs deterministic and removes the eval-time dependency on whatever toy project we test against.
+
+### 20.5 Models
+
+- Default: `claude-sonnet-4-5` for both roles (cheap, fast tool use).
+- Stress runs: `claude-opus-4-7` supervisor, sonnet subagent — closer to a real supervisor/worker decomposition.
+- Model id lives **only** in `ModelConfig`, never inlined. Eval scripts can sweep it.
+
+### 20.6 Fixture corpora (for eval)
+
+Each PLAN §11.1 / §11.2 task needs a deterministic input fixture stored under `eval/fixtures/`:
+
+```text
+eval/fixtures/
+  pytest_auth_expiry.log
+  npm_test_flake.log
+  rg_grep_noise.txt
+  git_diff_auth_refactor.diff
+  docker_oom.log
+  api_500_payload.json
+```
+
+These are captured once, checked in, and replayed. The eval driver (PLAN §11) instantiates four configurations (B1 raw, B2 truncated, B3 summary-only, B4 ArtifactStore) against the same fixture and the same task description, measures (tokens_injected, evidence_recall, task_success, blocked_reads), and writes results to `eval/runs/<timestamp>/`.
+
+### 20.7 What this demo deliberately omits
+
+```text
+- multi-step planner / router
+- tool selection over a giant catalog
+- long-running agent supervision UI
+- streaming responses
+- MCP servers
+- learned retrieval / embeddings (FTS5 only, unless §11 needs it)
+- recursive subagents (one supervisor → one subagent is enough)
+```
+
+If a reviewer asks "why so simple?" — the answer is in §17. ArtifactStore is the contribution; the agent harness is just the test bench.
