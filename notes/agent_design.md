@@ -68,9 +68,14 @@ For the eval runs, the same workload is replayed against four configurations (B1
 
 ## Models to use
 
-- **Demo**: `claude-sonnet-4-5` for both roles — fast, cheap, good tool use. Override per-agent via `ModelConfig`.
-- **Stress runs**: `claude-opus-4-7` for supervisor, sonnet for subagent — closer to real supervisor/worker decomposition.
-- Keep the model id in **one place** (config), never hardcoded in agent code, so we can switch in eval scripts.
+The `anthropic` Python SDK is just the HTTP client. With `ANTHROPIC_BASE_URL` it talks to any Anthropic-API-compatible provider — we are not coupled to Anthropic.
+
+- **Default (cheap, good enough)**: `deepseek-v4-pro` via `https://api.deepseek.com/anthropic`. ~$0.44/M in, $0.87/M out — roughly 7× cheaper than Sonnet 4.5. Tool_use blocks behave the same. Set in `demo.agent.DEFAULT_MODEL`.
+- **Cheaper still**: `deepseek-v4-flash` for the subagent in eval sweeps ($0.14/$0.28).
+- **Anthropic native (alternate)**: unset `ANTHROPIC_BASE_URL`, `--model claude-sonnet-4-5` (or `claude-opus-4-7` for stress runs).
+- Keep the model id in **one place** (`ModelConfig`), never hardcoded in agent code, so eval scripts can sweep it.
+
+> ~~Open question: does DeepSeek's `/anthropic` endpoint emit real `tool_use` content blocks?~~ **Confirmed yes** via `python -m demo.runner --verify-tool-use` against `deepseek-v4-pro` (2 turns, 1 tool call, 76 in / 97 out tokens — ~$0.0001/call). The Anthropic Python SDK round-trips identically; no adapter needed. The `--verify-tool-use` flag stays as a pre-eval sanity check.
 
 ## Workload tools (the missing half)
 

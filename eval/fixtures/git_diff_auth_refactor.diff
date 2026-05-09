@@ -1,0 +1,57 @@
+diff --git a/app/auth.py b/app/auth.py
+index 4c1e9a2..b8f02d1 100644
+--- a/app/auth.py
++++ b/app/auth.py
+@@ -1,8 +1,9 @@
+ from __future__ import annotations
+-from datetime import datetime, timedelta
++from datetime import datetime, timedelta, timezone
+ import jwt
+ import logging
+
++# Auth tokens use UTC throughout. Comparing against local clocks is a bug.
+ log = logging.getLogger(__name__)
+ SIGNING_KEY = _load_signing_key()
+
+@@ -38,7 +39,7 @@ def mint_token(user_id: int, ttl_seconds: int = 3600) -> str:
+     payload = {
+         "sub": str(user_id),
+         "iat": datetime.utcnow().timestamp(),
+-        "exp": (datetime.utcnow() + timedelta(seconds=ttl_seconds)).isoformat(),
++        "exp": (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat(),
+     }
+     return jwt.encode(payload, SIGNING_KEY, algorithm="HS256")
+
+@@ -110,11 +111,15 @@ def validate_token(token: str) -> bool:
+     except jwt.InvalidTokenError:
+         return False
+
+-    now = datetime.now()
++    # Bug fix: compare aware-UTC against aware-UTC. The previous code used
++    # naive `datetime.now()` (local clock) against `exp` parsed as tz-aware
++    # UTC, causing premature rejection in non-UTC environments — see the
++    # test_auth_expiry failure in CI run #4188.
++    now = datetime.now(timezone.utc)
+     exp = datetime.fromisoformat(payload["exp"])
+     if now > exp:
+         log.warning("token rejected: now=%s exp=%s", now, exp)
+         return False
+     return True
+
+diff --git a/tests/test_auth.py b/tests/test_auth.py
+index 19a4c11..3e7b4d2 100644
+--- a/tests/test_auth.py
++++ b/tests/test_auth.py
+@@ -78,9 +78,12 @@ class TestAuthExpiry:
+
+     def test_auth_expiry(self):
+         token = mint_token(user_id=42, ttl_seconds=3600)
+-        # advance the clock by 30 minutes; token should still be valid
+-        with freeze_time(datetime.now() + timedelta(minutes=30)):
++        # advance the clock by 30 minutes; token should still be valid
++        with freeze_time(datetime.now(timezone.utc) + timedelta(minutes=30)):
+             assert validate_token(token) is True, "token expired prematurely"
++
++    def test_auth_expiry_naive_clock_rejected(self):
++        # Regression: naive datetime.now() must not be re-introduced.
++        assert "datetime.now()" not in open("app/auth.py").read()

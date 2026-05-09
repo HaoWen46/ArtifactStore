@@ -30,3 +30,8 @@ artifactstore_data/
 
 # Sub-cloned reference repos carry their own .git — don't track them
 notes/references/*/
+
+# Local env files — API keys etc. Never commit.
+.env
+.env.*
+!.env.example

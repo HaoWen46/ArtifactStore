@@ -1,9 +1,19 @@
-"""Minimal Claude tool-use agent loop.
+"""Minimal tool-use agent loop, provider-agnostic.
 
 Adapted from anthropic-quickstarts/agents (MIT). Stripped down: no MCP,
 no async-everywhere. Tools are sync callables; we wrap them in to_thread
 only if a tool ever needs it. The loop is the canonical one from
 platform.claude.com/docs/.../how-tool-use-works.
+
+The client is the `anthropic` Python SDK. The same SDK speaks Anthropic's
+Messages API natively *and* DeepSeek's Anthropic-compatible endpoint at
+`https://api.deepseek.com/anthropic`, so swapping providers is two env vars,
+not a code change. See CLAUDE.md "Demo agent / Provider configuration".
+
+Env vars consumed (when no client is injected):
+    ANTHROPIC_API_KEY     required; the provider's API key
+    ANTHROPIC_BASE_URL    optional; e.g. https://api.deepseek.com/anthropic
+                          for DeepSeek. Unset = native Anthropic.
 """
 from __future__ import annotations
 
@@ -13,6 +23,13 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from anthropic import Anthropic
+
+# Default model: DeepSeek V4 Pro. ~7-17x cheaper than Anthropic Sonnet 4.5
+# at the time of writing (~$0.44/M input vs $3/M, ~$0.87/M output vs $15/M),
+# and supports the same tool_use blocks via the /anthropic endpoint.
+# Override via ModelConfig(model=...) or runner --model flag.
+DEFAULT_MODEL = "deepseek-v4-pro"
+DEEPSEEK_BASE_URL = "https://api.deepseek.com/anthropic"
 
 
 @dataclass
@@ -32,9 +49,20 @@ class Tool:
 
 @dataclass
 class ModelConfig:
-    model: str = "claude-sonnet-4-5"
+    model: str = DEFAULT_MODEL
     max_tokens: int = 4096
+    # Hard ceiling on agent loop turns. When exceeded, Agent.run returns with
+    # stop_reason="max_turns" so callers (e.g. delegate) can detect non-natural
+    # termination and react. Necessary because not every provider honors
+    # `tool_choice: {type: tool, name: ...}` — DeepSeek's reasoning models
+    # reject it with 400 — so we can't reliably force submit_report; we rely
+    # on a strong prompt + this cap as the backstop.
+    max_turns: int = 10
     temperature: float = 1.0
+    # Provider override. None => use ANTHROPIC_BASE_URL env var, else SDK
+    # default (Anthropic). To target DeepSeek explicitly from code, pass
+    # base_url=DEEPSEEK_BASE_URL.
+    base_url: str | None = None
 
 
 @dataclass
@@ -62,7 +90,21 @@ class Agent:
         self.system = system
         self.tools = tools
         self.config = config or ModelConfig()
-        self.client = client or Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+        if client is None:
+            api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+            if not api_key:
+                raise RuntimeError(
+                    "ANTHROPIC_API_KEY is not set. The agent uses the `anthropic` "
+                    "Python SDK as the HTTP client; it works against both Anthropic "
+                    "and DeepSeek's Anthropic-compatible endpoint. Set "
+                    "ANTHROPIC_API_KEY to your provider key and (for DeepSeek) "
+                    "ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic. "
+                    "Tests should inject a client= stub."
+                )
+            base_url = self.config.base_url or os.environ.get("ANTHROPIC_BASE_URL")
+            client = (Anthropic(api_key=api_key, base_url=base_url)
+                      if base_url else Anthropic(api_key=api_key))
+        self.client = client
         self.verbose = verbose
         self.force_terminator = force_terminator
         self._tool_dict = {t.name: t for t in tools}
@@ -90,6 +132,23 @@ class Agent:
 
         while True:
             turns += 1
+            if turns > self.config.max_turns:
+                # Hard cap. Loop didn't terminate naturally — caller (e.g. the
+                # delegate adapter in demo/runner.py) inspects stop_reason
+                # and reports the failure. Returning a synthetic AgentResult
+                # rather than raising lets the caller decide policy.
+                if self.verbose:
+                    print(f"[{self.name}] hit max_turns={self.config.max_turns}; "
+                          f"exiting without natural termination")
+                return AgentResult(
+                    final_text=f"[agent={self.name} hit max_turns="
+                                f"{self.config.max_turns} without termination]",
+                    stop_reason="max_turns",
+                    turns=turns - 1,
+                    tool_calls=tool_calls,
+                    input_tokens=in_tok,
+                    output_tokens=out_tok,
+                )
             kwargs: dict[str, Any] = {
                 "model": self.config.model,
                 "max_tokens": self.config.max_tokens,
@@ -98,10 +157,26 @@ class Agent:
                 "tools": [t.to_dict() for t in self.tools],
                 "messages": self.messages,
             }
-            if self.force_terminator and turns >= 8:
-                kwargs["tool_choice"] = {"type": "tool", "name": self.force_terminator}
+            # Best-effort terminator nudge in the final 2 turns: force the
+            # model to use SOME tool. We use {type: any} (broadly supported)
+            # rather than {type: tool, name: ...}, which DeepSeek's reasoning
+            # models reject with 400. This relies on the system prompt to
+            # bias toward submit_report; max_turns is the actual safety net.
+            if (self.force_terminator
+                    and turns >= self.config.max_turns - 1):
+                kwargs["tool_choice"] = {"type": "any"}
 
-            resp = self.client.messages.create(**kwargs)
+            try:
+                resp = self.client.messages.create(**kwargs)
+            except Exception as e:
+                # Defensive: if the provider rejects tool_choice (some do),
+                # retry once without it. Surfacing the original error keeps
+                # other failures (rate limits, auth) loud.
+                if "tool_choice" in kwargs and "tool_choice" in str(e):
+                    kwargs.pop("tool_choice")
+                    resp = self.client.messages.create(**kwargs)
+                else:
+                    raise
             in_tok += resp.usage.input_tokens
             out_tok += resp.usage.output_tokens
 

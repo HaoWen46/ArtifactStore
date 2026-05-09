@@ -1,0 +1,25 @@
+{
+  "fixture": "git_diff_auth_refactor.diff",
+  "artifact_type": "git_diff",
+  "ground_truth": {
+    "diagnosis_keywords": ["timezone", "utc", "naive", "aware", "datetime.now"],
+    "key_evidence": [
+      {
+        "span_type": "changed_line",
+        "file_path": "app/auth.py",
+        "line_start": 111,
+        "must_contain": "datetime.now(timezone.utc)"
+      },
+      {
+        "span_type": "changed_line",
+        "file_path": "app/auth.py",
+        "line_start": 39,
+        "must_contain": "datetime.now(timezone.utc)"
+      }
+    ],
+    "files_changed": ["app/auth.py", "tests/test_auth.py"],
+    "additions": 11,
+    "deletions": 3
+  },
+  "notes": "The fix that resolves pytest_auth_expiry.log: switch naive datetime.now() to datetime.now(timezone.utc) in mint_token + validate_token. Linked to pytest_auth_expiry artifact via 'caused_by' relation in the eval setup."
+}

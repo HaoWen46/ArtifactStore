@@ -1,0 +1,24 @@
+app/auth.py:42:def mint_token(user_id: int, ttl_seconds: int = 3600) -> str:
+app/auth.py:58:    # TODO(auth): rotate signing key on rollover
+app/auth.py:101:def validate_token(token: str) -> bool:
+app/auth.py:117:        log.warning("token rejected: now=%s exp=%s", now, exp)
+app/auth.py:118:        return False
+app/auth.py:140:    # FIXME: handle malformed JWT header gracefully
+app/cache.py:12:# TODO: per-tenant cache invalidation
+app/cache.py:88:def evict(key: str) -> None:
+app/cache.py:204:    # TODO: emit metrics on evict path
+app/billing/invoices.py:7:# TODO(billing): support partial refunds
+app/billing/invoices.py:55:def charge(customer_id: str, amount_cents: int) -> str:
+app/billing/invoices.py:312:    # FIXME: idempotency token collision under retry
+app/db/migrations/0042_add_index.sql:1:-- TODO: backfill before flipping NOT NULL
+docs/internal/auth_design.md:18:- TODO: document refresh-token revocation flow
+docs/internal/auth_design.md:91:- TODO: add rate-limit policy section
+scripts/release.sh:14:# TODO: switch to signed tags after CI cutover
+tests/test_auth.py:24:    # TODO: parametrize TTL boundaries
+tests/test_auth.py:84:        assert validate_token(token) is True, "token expired prematurely"
+tests/test_billing.py:55:    # TODO: cover partial refund branch
+tests/test_billing.py:201:    # TODO: skip until billing-v2 lands
+tests/test_cache.py:9:# TODO: integration test against real Redis
+tests/test_session.py:31:    # FIXME: flaky on macOS due to clock skew
+vendor/legacy/parse.py:88:# TODO: drop after migration to lark
+vendor/legacy/parse.py:412:# FIXME: stack overflow on deeply nested input

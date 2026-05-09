@@ -6,7 +6,7 @@ Research prototype (DBMS course). Authoritative spec: `ArtifactStore_PLAN.md` �
 
 ## Stack
 
-- Python 3.11+, managed with **uv** (`uv sync`, `uv run pytest`, `uv add <pkg>`). Never call bare `python`/`pip`.
+- Python 3.12 (pinned via `.python-version`), managed with **uv** (`uv sync`, `uv run pytest`, `uv add <pkg>`). Never call bare `python`/`pip`.
 - SQLite (stdlib) + FTS5 — chosen over DuckDB: FTS5 is built-in, single-file, no extra dep, fine for prototype scale.
 - Typer (or argparse) for CLI
 - pytest for tests
@@ -22,6 +22,7 @@ artifactstore/        # the contribution
   extractors.py       # type → span extractors (registry by artifact_type)
   views.py            # preview / evidence / redacted / raw / provenance
   grants.py           # predicate matching, op/view checks, audit logging
+  cite.py             # citation parse + verify (art_xxx/span_y)
   cli.py              # init / put / search / spans / expand / grant / audit
 demo/                 # the test bench (PLAN §20)
   agent.py            # Tool, ModelConfig, Agent.run() — Claude tool-use loop
@@ -34,6 +35,24 @@ notes/
   references/         # MIT-licensed reference repos (read-only, do not edit)
 eval/                 # fixtures + RQ1-4 driver (PLAN §11, §20.6)
 ```
+
+## Design choices (locked)
+
+These nail down the open questions in PLAN §7–§9 and §20. Do not relitigate without a reason.
+
+- **Raw storage = BLOB.** A single `raw_blob` column on `artifacts` (added alongside `raw_uri`/`raw_hash`). Single source of truth, atomic with metadata, no orphan files. `raw_uri` stays nullable for a future file-backed escape hatch (`file://...`).
+- **`raw_hash` = sha256(raw_text utf-8), hex.** Computed in `put_artifact`; never recomputed on read.
+- **Preview = ≤256 tokens.** One header line `[<artifact_type> | <one-line summary> | <raw_token_count> tokens]` produced by a type-driven preview registry (mirrors `extractors.py`), then content lines until budget hits. Hard cap, not advisory.
+- **Citation format = `art_<8hex>/span_<8hex>`.** One implementation in `artifactstore/cite.py` (`parse`, `verify`). Both supervisor harness and eval driver call into it — no regex sprinkled in agent code.
+- **Sensitivity ordering**: `public(0) < internal(1) < restricted(2) < secret(3)`. Default artifact label = `internal`. `sensitivity_max` in a grant predicate = numeric ≤. Lives in `grants.py` as one dict.
+- **`path_prefixes` semantics (prototype)**: applied **only to `artifact_spans.file_path`**. A span whose `file_path` is None is path-opaque and always passes the prefix check; a span with a path passes only if it starts with one of the prefixes. No artifact-level `path` column.
+- **Token-budget enforcement = omit-fits.** Iterate spans by `importance DESC, span_id`; include whole-or-skip until next span would overflow. Predictable, easy to test. Same rule for `search`, `get_spans`, `expand_view(evidence)`.
+- **FTS5 lifecycle**: one row inserted per `put_artifact` (`span_text = "\n".join(spans)`); artifacts are **immutable**, no update path in v1.
+- **Synthetic `__supervisor__` grant** is seeded by `migrate()` (idempotent INSERT in `schema.sql`). Allows audit-log FKs to resolve and keeps `expand_artifact` from special-casing in app code.
+- **Subagent termination**: `force_terminator="submit_report"` after 8 turns (already in `demo/agent.py`). Endorsed by PLAN §20.3.
+- **API key safety**: `Agent.__init__` fails loudly if `ANTHROPIC_API_KEY` is missing **and** no client is injected. Tests inject a stub client.
+- **Gold-truth fixtures**: each `eval/fixtures/<name>.<ext>` ships with a sibling `<name>.gold.json` listing the expected evidence — that's how RQ2 evidence-recall stops being a vibe.
+- **`eval/runs/<UTC-iso>/`** layout: `config.json` (baseline + model + fixture), `result.jsonl` (one row per task), `audit.csv` (dump of `artifact_access_log`), `manifest.json` (git rev + timing). Driver writes; nothing else touches.
 
 ## Build order (PLAN §13)
 
@@ -64,12 +83,32 @@ Skill/tool selection, general agent memory, KV-cache, A2A protocol, multi-agent 
 
 ## Demo agent (PLAN §20)
 
-- Stack: Anthropic Messages API + a ~150-LOC client-side tool-use loop. **Not** the Claude Agent SDK, not MCP, not a planner.
+- Stack: Anthropic Messages API shape + a ~150-LOC client-side tool-use loop. **Not** the Claude Agent SDK, not MCP, not a planner.
 - Two agents only: supervisor → subagent. No recursion.
 - `grant_id` is bound at tool-construction time; the model never sees it. Harness enforces scope, not the LLM.
 - After the subagent submits, the supervisor verifies every citation by `expand_artifact` — unresolvable citation = report rejected.
 - Fixtures (real pytest/npm/rg/git logs) live in `eval/fixtures/`, replayed deterministically. Don't run live `pytest` from the demo.
 - Reference: `notes/agent_design.md` for canonical loop, hard rules, and pitfalls (tool_result ordering, parallel tool_use, etc.).
+
+### Provider configuration
+
+The agent loop uses the `anthropic` Python SDK as its HTTP client, but **the project does not require Anthropic as a provider**. The SDK works against any Anthropic-API-compatible endpoint via `ANTHROPIC_BASE_URL`.
+
+Default provider: **DeepSeek V4** (much cheaper, same Messages API shape). DeepSeek docs: <https://api-docs.deepseek.com/guides/anthropic_api>.
+
+```bash
+# DeepSeek (default, recommended)
+export ANTHROPIC_API_KEY="<your DeepSeek key from platform.deepseek.com>"
+export ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic"
+
+# Native Anthropic (alternate)
+export ANTHROPIC_API_KEY="<your Anthropic key>"
+unset ANTHROPIC_BASE_URL
+```
+
+`demo.agent.DEFAULT_MODEL = "deepseek-v4-pro"`. For cheaper iteration, override with `--model deepseek-v4-flash`. For native Anthropic runs, override with `--model claude-sonnet-4-5` (or whatever).
+
+Tests don't touch this — they inject a `ScriptedClient` stub directly. No keys, no network.
 
 ## Eval targets (PLAN §14)
 

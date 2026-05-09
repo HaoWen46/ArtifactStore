@@ -1,0 +1,26 @@
+{
+  "fixture": "rg_grep_noise.txt",
+  "artifact_type": "grep_result",
+  "ground_truth": {
+    "diagnosis_keywords": ["auth", "todo", "fixme"],
+    "key_evidence": [
+      {
+        "span_type": "grep_hit",
+        "file_path": "app/auth.py",
+        "line": 117,
+        "must_contain": "token rejected: now=%s exp=%s"
+      },
+      {
+        "span_type": "grep_hit",
+        "file_path": "tests/test_auth.py",
+        "line": 84,
+        "must_contain": "token expired prematurely"
+      }
+    ],
+    "expected_total_hits": 24,
+    "noise_paths": [
+      "app/billing/", "app/cache.py", "vendor/legacy/", "scripts/", "docs/"
+    ]
+  },
+  "notes": "Mixed-relevance ripgrep output. Auth-scoped grant should surface the two key_evidence rows; billing/cache/vendor hits should be filtered by path_prefixes=['app/auth', 'tests/test_auth']."
+}

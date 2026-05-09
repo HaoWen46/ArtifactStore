@@ -826,11 +826,14 @@ The evaluations in §11 require a real, runnable supervisor/subagent harness. We
 ### 20.1 Stack
 
 ```text
-Anthropic Messages API           (Python SDK)
+Anthropic Messages API SHAPE     (provider-agnostic; we use the
+                                  anthropic Python SDK as the HTTP client)
 client-side tool use loop        (~150 LOC, in demo/agent.py)
 no MCP, no async-everywhere
 no router, no planner, no scratchpad memory beyond message history
 ```
+
+The `anthropic` Python SDK works against any Anthropic-compatible endpoint via the `ANTHROPIC_BASE_URL` env var, so the project is not coupled to Anthropic as a provider. **Default provider: DeepSeek V4** at `https://api.deepseek.com/anthropic` — same Messages API + tool_use blocks, ~10x cheaper. Native Anthropic remains a one-env-var swap.
 
 Reference implementation studied: `anthropic/anthropic-quickstarts/agents` (MIT). We adapt the `Tool` dataclass + parallel `execute_tools` pattern. Notes in `notes/agent_design.md`.
 
@@ -899,9 +902,10 @@ The supervisor's `run_workload` is **stubbed for the demo**: it reads a fixture 
 
 ### 20.5 Models
 
-- Default: `claude-sonnet-4-5` for both roles (cheap, fast tool use).
-- Stress runs: `claude-opus-4-7` supervisor, sonnet subagent — closer to a real supervisor/worker decomposition.
-- Model id lives **only** in `ModelConfig`, never inlined. Eval scripts can sweep it.
+- Default: `deepseek-v4-pro` for both roles via DeepSeek's Anthropic-compatible endpoint. Solid tool-use behavior, ~$0.44/M input + $0.87/M output (~10x cheaper than Sonnet 4.5).
+- Cheap iteration: swap subagent to `deepseek-v4-flash` (~$0.14/$0.28). Eval supervisor stays on pro for stable comparisons across baselines.
+- Anthropic alternate: `claude-sonnet-4-5` (or `claude-opus-4-7` supervisor + sonnet subagent for the §11.2 stress runs). One env var swap (`ANTHROPIC_BASE_URL`).
+- Model id lives **only** in `ModelConfig`, never inlined. Eval scripts can sweep it. `demo.agent.DEFAULT_MODEL` is the single source of truth for the default.
 
 ### 20.6 Fixture corpora (for eval)
 

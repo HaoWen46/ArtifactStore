@@ -165,6 +165,26 @@ def supervisor_tools(
         return store.expand_view(artifact_id=artifact_id, grant_id="__supervisor__",
                                  view=view, token_budget=token_budget)
 
+    def _verify_citation(citation: str) -> dict:
+        """Resolve a 'art_xxx/span_yyy' citation. The supervisor should call
+        this on each citation in a subagent's submit_report. Cleaner than
+        passing the whole citation string into expand_artifact (which expects
+        just artifact_id, not artifact_id/span_id)."""
+        from artifactstore.cite import BadCitation, parse, verify_resolves
+        try:
+            art_id, span_id = parse(citation)
+        except BadCitation as e:
+            return {"citation": citation, "resolved": False,
+                    "error": f"malformed: {e}"}
+        ok = verify_resolves(store.conn, citation)
+        return {
+            "citation": citation,
+            "resolved": ok,
+            "artifact_id": art_id,
+            "span_id": span_id,
+            "error": None if ok else "span not found in store",
+        }
+
     return [
         Tool(
             name="run_workload",
@@ -236,13 +256,14 @@ def supervisor_tools(
         ),
         Tool(
             name="expand_artifact",
-            description="Materialize a view of an artifact. Use this to verify "
-                        "the subagent's citations resolve to real evidence. "
+            description="Materialize a view of an artifact (NOT a citation — "
+                        "artifact_id is just 'art_xxx', no slash, no span_id). "
                         "Views: preview | evidence | redacted | raw | provenance.",
             input_schema={
                 "type": "object",
                 "properties": {
-                    "artifact_id":  {"type": "string"},
+                    "artifact_id":  {"type": "string",
+                                     "description": "art_<8hex>, no slash"},
                     "view":         {"type": "string",
                                      "enum": ["preview", "evidence", "redacted",
                                               "raw", "provenance"]},
@@ -251,5 +272,22 @@ def supervisor_tools(
                 "required": ["artifact_id", "view"],
             },
             fn=_expand_artifact,
+        ),
+        Tool(
+            name="verify_citation",
+            description="Verify ONE citation 'art_xxx/span_yyy' resolves to a "
+                        "real span in the store. Returns {resolved: bool, "
+                        "artifact_id, span_id, error?}. Use this — not "
+                        "expand_artifact — to verify subagent submit_report "
+                        "citations one at a time.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "citation": {"type": "string",
+                                 "description": "format: art_<8hex>/span_<8hex>"},
+                },
+                "required": ["citation"],
+            },
+            fn=_verify_citation,
         ),
     ]

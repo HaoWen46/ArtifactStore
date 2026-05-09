@@ -7,11 +7,13 @@ CREATE TABLE IF NOT EXISTS artifacts (
     creator_agent_id   TEXT,
     tool_name          TEXT,
     artifact_type      TEXT NOT NULL,
-    raw_uri            TEXT,
-    raw_hash           TEXT NOT NULL,
+    raw_uri            TEXT,                       -- nullable; reserved for file-backed escape hatch
+    raw_blob           TEXT,                       -- canonical raw text storage (CLAUDE.md: BLOB)
+    raw_hash           TEXT NOT NULL,              -- sha256 hex of raw_text
     token_count        INTEGER,
     preview            TEXT,
-    sensitivity_label  TEXT,
+    sensitivity_label  TEXT DEFAULT 'internal',
+    metadata_json      TEXT,                       -- per-artifact metadata (target, live, ...)
     created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -77,4 +79,19 @@ CREATE VIRTUAL TABLE IF NOT EXISTS artifact_fts USING fts5(
     preview,
     span_text,
     tool_name
+);
+
+-- Synthetic supervisor grant. The supervisor harness uses this for citation
+-- verification (PLAN §20.2) so audit-log FKs always resolve and there's no
+-- special case in app code. Idempotent.
+INSERT OR IGNORE INTO artifact_grants (
+    grant_id, subject_agent_id, issuer_agent_id,
+    artifact_predicate, allowed_ops, allowed_views,
+    max_tokens, expires_at
+) VALUES (
+    '__supervisor__', '__supervisor__', '__system__',
+    '{}',
+    '["search","get_spans","expand_view","find_related"]',
+    '["preview","evidence","redacted","raw","provenance"]',
+    NULL, NULL
 );

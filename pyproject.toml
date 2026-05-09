@@ -17,10 +17,10 @@ tokens = ["tiktoken>=0.7"]
 dev = ["pytest>=8", "ruff>=0.5"]
 
 [project.scripts]
-artifactstore = "artifactstore.cli:app"
+artifactstore = "artifactstore.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["artifactstore*"]
+include = ["artifactstore*", "demo*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

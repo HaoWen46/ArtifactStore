@@ -1,0 +1,25 @@
+{
+  "fixture": "pytest_auth_expiry.log",
+  "artifact_type": "pytest_failure",
+  "ground_truth": {
+    "diagnosis_keywords": ["timezone", "utc", "local", "naive", "aware"],
+    "key_evidence": [
+      {
+        "span_type": "assertion",
+        "must_contain": "AssertionError: token expired prematurely",
+        "file_path": "tests/test_auth.py",
+        "line": 84
+      },
+      {
+        "span_type": "log_warning",
+        "must_contain": "now=2026-05-07T08:30:00 exp=2026-05-07T01:00:00+00:00",
+        "file_path": "auth.py",
+        "line": 117
+      }
+    ],
+    "expected_failed_tests": ["tests/test_auth.py::TestAuthExpiry::test_auth_expiry"],
+    "expected_pass_count": 46,
+    "expected_fail_count": 1
+  },
+  "notes": "Root cause: validate_token compares naive local-clock 'now' against tz-aware UTC 'exp'. The :30 difference between 08:30 (local) and 01:00 (UTC) is the smoking gun in the WARNING log line."
+}
