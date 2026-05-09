@@ -71,8 +71,22 @@ class AgentResult:
     stop_reason: str
     turns: int
     tool_calls: int
+    # Token accounting. `input_tokens` is the SDK's "uncached" count (what's
+    # billed at full rate); cache_read/cache_creation are populated when the
+    # provider supports prompt caching (Anthropic native, DeepSeek). For
+    # RQ1 efficiency comparisons across baselines, use `total_input_tokens`
+    # — the actual tokens the model saw — not just `input_tokens`, which
+    # gets warped by cache hits when reps share prompts.
     input_tokens: int
     output_tokens: int
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+
+    @property
+    def total_input_tokens(self) -> int:
+        return (self.input_tokens
+                + self.cache_read_input_tokens
+                + self.cache_creation_input_tokens)
 
 
 class Agent:
@@ -128,7 +142,8 @@ class Agent:
 
     def run(self, user_input: str) -> AgentResult:
         self.messages.append({"role": "user", "content": user_input})
-        in_tok = out_tok = turns = tool_calls = 0
+        in_tok = out_tok = cache_read = cache_create = 0
+        turns = tool_calls = 0
 
         while True:
             turns += 1
@@ -148,6 +163,8 @@ class Agent:
                     tool_calls=tool_calls,
                     input_tokens=in_tok,
                     output_tokens=out_tok,
+                    cache_read_input_tokens=cache_read,
+                    cache_creation_input_tokens=cache_create,
                 )
             kwargs: dict[str, Any] = {
                 "model": self.config.model,
@@ -179,6 +196,13 @@ class Agent:
                     raise
             in_tok += resp.usage.input_tokens
             out_tok += resp.usage.output_tokens
+            # Anthropic + DeepSeek both expose these on usage when prompt
+            # caching is in play. They may be missing or None on other
+            # providers (or on the first call) — getattr-with-default keeps
+            # us robust.
+            cache_read += getattr(resp.usage, "cache_read_input_tokens", 0) or 0
+            cache_create += getattr(
+                resp.usage, "cache_creation_input_tokens", 0) or 0
 
             self.messages.append({"role": "assistant", "content": resp.content})
 
@@ -199,6 +223,8 @@ class Agent:
                     tool_calls=tool_calls,
                     input_tokens=in_tok,
                     output_tokens=out_tok,
+                    cache_read_input_tokens=cache_read,
+                    cache_creation_input_tokens=cache_create,
                 )
 
             tool_results = [self._exec_tool(c) for c in tool_uses]

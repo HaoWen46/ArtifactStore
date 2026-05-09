@@ -63,6 +63,11 @@ FIXTURE_REGISTRY: dict[str, dict[str, str]] = {
     "pytest_auth_expiry":     {"kind": "pytest", "target": "auth_expiry",
                                 "artifact_type": "pytest_failure",
                                 "ext": ".log"},
+    # ~3500-token pytest log with 5 failures. Tests RQ1 token efficiency:
+    # B1 must inject all 3500; B4 fetches only the relevant spans.
+    "pytest_large_run":       {"kind": "pytest", "target": "auth_expiry",
+                                "artifact_type": "pytest_failure",
+                                "ext": ".log"},
     "rg_grep_noise":          {"kind": "grep",   "target": "todos",
                                 "artifact_type": "grep_result",
                                 "ext": ".txt"},
@@ -83,8 +88,15 @@ class RunResult:
     baseline: str
     rep: int
     model: str
-    # Token usage
+    # Token usage. RQ1 should compare `total_input_tokens`, NOT
+    # `input_tokens` — DeepSeek's prompt cache makes the latter wildly
+    # rep-dependent (rep 0 pays full, reps 1-2 hit cache). Reporting all
+    # three lets the writeup separate "tokens the model saw" from
+    # "tokens billed at full rate".
     input_tokens: int
+    cache_read_input_tokens: int
+    cache_creation_input_tokens: int
+    total_input_tokens: int
     output_tokens: int
     # Loop accounting
     turns: int
@@ -148,11 +160,14 @@ def _run_one(*, fixture: str, baseline: str, rep: int, model: str,
     )
     started = time.time()
     error: str | None = None
+    cache_read = cache_create = 0
     try:
         result = agent.run(setup.user_message)
         diagnosis = result.final_text
         stop_reason = result.stop_reason
         in_tok = result.input_tokens
+        cache_read = result.cache_read_input_tokens
+        cache_create = result.cache_creation_input_tokens
         out_tok = result.output_tokens
         turns = result.turns
         tool_calls = result.tool_calls
@@ -175,8 +190,15 @@ def _run_one(*, fixture: str, baseline: str, rep: int, model: str,
         audit_rows.extend(store.audit(setup.grant_id))
     audit_rows.extend(store.audit("__supervisor__"))
 
+    # Cost approximation: uncached + cache_creation at full rate (creation
+    # is 1.25x in DeepSeek's table but we use 1x for back-of-envelope),
+    # cache_read at 0.1x. Real billing follows the provider's pricing page.
     rates = PRICE_PER_MTOK.get(model, {"input": 0.0, "output": 0.0})
-    cost = (in_tok * rates["input"] + out_tok * rates["output"]) / 1_000_000
+    cost = (
+        (in_tok + cache_create) * rates["input"]
+        + cache_read * rates["input"] * 0.1
+        + out_tok * rates["output"]
+    ) / 1_000_000
 
     return RunResult(
         run_id=run_id,
@@ -185,6 +207,9 @@ def _run_one(*, fixture: str, baseline: str, rep: int, model: str,
         rep=rep,
         model=model,
         input_tokens=in_tok,
+        cache_read_input_tokens=cache_read,
+        cache_creation_input_tokens=cache_create,
+        total_input_tokens=in_tok + cache_read + cache_create,
         output_tokens=out_tok,
         turns=turns,
         tool_calls=tool_calls,
@@ -284,7 +309,15 @@ def run_eval(*, fixtures: list[str], baselines: list[str], reps: int,
                 result_jsonl.flush()
                 write_audit(audit_rows, rr.run_id)
                 ok = "ok" if rr.task_success and not rr.error else "FAIL"
-                print(f" {ok}  in={rr.input_tokens} out={rr.output_tokens}"
+                # `tot` = total tokens the model saw (uncached + cache hits +
+                # cache writes). Use this for RQ1 — `in` alone is warped by
+                # caching across reps that share a system/user prompt.
+                cache_str = (f" cache={rr.cache_read_input_tokens}r/"
+                             f"{rr.cache_creation_input_tokens}w"
+                             if (rr.cache_read_input_tokens
+                                 or rr.cache_creation_input_tokens) else "")
+                print(f" {ok}  in={rr.input_tokens}{cache_str} "
+                      f"tot={rr.total_input_tokens} out={rr.output_tokens}"
                       f" turns={rr.turns} cost=${rr.estimated_cost_usd:.4f}"
                       f" recall={rr.evidence_recall:.2f}"
                       f"{' BLOCKED='+str(rr.blocked_reads) if rr.blocked_reads else ''}")
@@ -300,28 +333,40 @@ def run_eval(*, fixtures: list[str], baselines: list[str], reps: int,
         "successful": sum(1 for r in results if r.task_success),
         "failed": sum(1 for r in results if not r.task_success),
         "exceptions": sum(1 for r in results if r.error),
-        "total_input_tokens": sum(r.input_tokens for r in results),
+        "total_input_tokens_uncached": sum(r.input_tokens for r in results),
+        "total_input_tokens_cache_read": sum(
+            r.cache_read_input_tokens for r in results),
+        "total_input_tokens_cache_creation": sum(
+            r.cache_creation_input_tokens for r in results),
+        "total_input_tokens_all": sum(r.total_input_tokens for r in results),
         "total_output_tokens": sum(r.output_tokens for r in results),
         "total_estimated_cost_usd": sum(r.estimated_cost_usd for r in results),
         "by_baseline": {
             b: {
-                "runs": sum(1 for r in results if r.baseline == b),
-                "avg_input_tokens": (
+                "runs": (n := sum(1 for r in results if r.baseline == b)),
+                "avg_input_tokens_uncached": (
                     sum(r.input_tokens for r in results if r.baseline == b)
-                    / max(1, sum(1 for r in results if r.baseline == b))
+                    / max(1, n)
+                ),
+                "avg_total_input_tokens": (
+                    sum(r.total_input_tokens for r in results
+                        if r.baseline == b) / max(1, n)
                 ),
                 "avg_output_tokens": (
                     sum(r.output_tokens for r in results if r.baseline == b)
-                    / max(1, sum(1 for r in results if r.baseline == b))
+                    / max(1, n)
                 ),
                 "avg_evidence_recall": (
                     sum(r.evidence_recall for r in results if r.baseline == b)
-                    / max(1, sum(1 for r in results if r.baseline == b))
+                    / max(1, n)
                 ),
                 "task_success_rate": (
                     sum(1 for r in results
-                        if r.baseline == b and r.task_success)
-                    / max(1, sum(1 for r in results if r.baseline == b))
+                        if r.baseline == b and r.task_success) / max(1, n)
+                ),
+                "avg_estimated_cost_usd": (
+                    sum(r.estimated_cost_usd for r in results
+                        if r.baseline == b) / max(1, n)
                 ),
             }
             for b in baselines
