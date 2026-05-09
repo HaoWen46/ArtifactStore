@@ -118,6 +118,14 @@ def check(conn: sqlite3.Connection, grant_id: str, artifact_id: str | None,
         if datetime.now(timezone.utc) > exp:
             _deny("grant expired")
 
+    # Cumulative token budget. max_tokens=NULL on a grant means unlimited
+    # (the seeded __supervisor__ grant uses this). Otherwise reads stop the
+    # moment consumed_tokens >= max_tokens — a hard quota, not advisory.
+    max_tokens = grant.get("max_tokens")
+    consumed = grant.get("consumed_tokens") or 0
+    if max_tokens is not None and consumed >= max_tokens:
+        _deny(f"grant budget exhausted ({consumed}/{max_tokens} tokens)")
+
     if artifact_id is not None:
         art = conn.execute(
             "SELECT * FROM artifacts WHERE artifact_id = ?", (artifact_id,)
@@ -128,6 +136,21 @@ def check(conn: sqlite3.Connection, grant_id: str, artifact_id: str | None,
             _deny("artifact does not match grant predicate")
 
     return grant
+
+
+def account_consumption(conn: sqlite3.Connection, grant_id: str,
+                        tokens: int) -> None:
+    """Increment a grant's consumed_tokens after a successful read. Called by
+    the store API alongside log_access. No-op for grants with NULL max_tokens
+    (unlimited) — we still track for observability but it can't trip a denial.
+    """
+    if tokens <= 0:
+        return
+    conn.execute(
+        "UPDATE artifact_grants SET consumed_tokens = "
+        "COALESCE(consumed_tokens, 0) + ? WHERE grant_id = ?",
+        (tokens, grant_id),
+    )
 
 
 def log_access(conn: sqlite3.Connection, *, grant_id: str | None,

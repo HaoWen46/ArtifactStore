@@ -51,7 +51,8 @@ CREATE TABLE IF NOT EXISTS artifact_grants (
     artifact_predicate TEXT NOT NULL,  -- JSON
     allowed_ops        TEXT NOT NULL,  -- JSON array
     allowed_views      TEXT NOT NULL,  -- JSON array
-    max_tokens         INTEGER,
+    max_tokens         INTEGER,        -- NULL = unlimited; else cumulative cap
+    consumed_tokens    INTEGER DEFAULT 0,  -- ticks up on every successful read
     expires_at         TIMESTAMP
 );
 

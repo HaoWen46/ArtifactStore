@@ -21,6 +21,7 @@ from artifactstore.extractors import extract
 from artifactstore.grants import (
     AccessDenied,
     DEFAULT_SENSITIVITY,
+    account_consumption,
     check,
     load_grant,
     log_access,
@@ -58,7 +59,13 @@ class ArtifactStore:
         aid = new_id("art")
         raw_hash = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
         raw_tokens = estimate(raw_text)
-        preview_text = make_preview(artifact_type, raw_text, raw_tokens)
+
+        # Extract spans BEFORE building the preview so the preview body can
+        # inline the top-importance spans. For diagnostic artifact types the
+        # preview becomes meaningfully diagnostic, not just a head sample.
+        spans = extract(artifact_type, raw_text)
+        preview_text = make_preview(artifact_type, raw_text, raw_tokens,
+                                    spans=spans)
 
         self.conn.execute(
             """INSERT INTO artifacts(
@@ -72,9 +79,7 @@ class ArtifactStore:
         )
 
         span_texts: list[str] = []
-        for stype, fpath, lstart, lend, text, importance in extract(
-            artifact_type, raw_text
-        ):
+        for stype, fpath, lstart, lend, text, importance in spans:
             sid = new_id("span")
             self.conn.execute(
                 """INSERT INTO artifact_spans(
@@ -85,6 +90,17 @@ class ArtifactStore:
                  estimate(text), importance),
             )
             span_texts.append(text)
+
+        # Auto-link to parent (provenance). PLAN §7.3 'derived_from' relation.
+        # Without this, find_related is dead code; with it, every multi-step
+        # workload chain (e.g. pytest -> git diff -> rerun) is traversable.
+        if parent_artifact_id is not None:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO artifact_links("
+                "src_artifact_id, dst_artifact_id, relation, confidence) "
+                "VALUES (?, ?, ?, ?)",
+                (aid, parent_artifact_id, "derived_from", 1.0),
+            )
 
         self.conn.execute(
             """INSERT INTO artifact_fts(
@@ -154,6 +170,7 @@ class ArtifactStore:
                    subject_agent_id=grant["subject_agent_id"],
                    artifact_id=None, operation="search", view=None,
                    result_token_count=used, allowed=True, denial_reason=None)
+        account_consumption(self.conn, grant_id, used)
         return out
 
     def get_spans(
@@ -202,6 +219,7 @@ class ArtifactStore:
                    subject_agent_id=grant["subject_agent_id"],
                    artifact_id=artifact_id, operation="get_spans", view=None,
                    result_token_count=used, allowed=True, denial_reason=None)
+        account_consumption(self.conn, grant_id, used)
         return out
 
     def expand_view(
@@ -219,11 +237,13 @@ class ArtifactStore:
             self.conn, artifact_id, token_budget,
             predicate=grant["artifact_predicate"],
         )
+        rendered_tokens = estimate(rendered)
         log_access(self.conn, grant_id=grant_id,
                    subject_agent_id=grant["subject_agent_id"],
                    artifact_id=artifact_id, operation="expand_view", view=view,
-                   result_token_count=estimate(rendered),
+                   result_token_count=rendered_tokens,
                    allowed=True, denial_reason=None)
+        account_consumption(self.conn, grant_id, rendered_tokens)
         return rendered
 
     def find_related(
