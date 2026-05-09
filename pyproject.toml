@@ -20,7 +20,7 @@ dev = ["pytest>=8", "ruff>=0.5"]
 artifactstore = "artifactstore.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["artifactstore*", "demo*"]
+include = ["artifactstore*", "demo*", "eval*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
