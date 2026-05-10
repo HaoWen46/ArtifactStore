@@ -21,6 +21,7 @@ from typing import Any, Callable
 from artifactstore import ArtifactStore
 from artifactstore.tokens import estimate
 from demo.agent import Tool
+from demo.workloads import deterministic_summary
 
 
 B1_B2_B3_SYSTEM = """\
@@ -93,31 +94,15 @@ def b2_truncated(store: ArtifactStore, fixture_data: str,
     return Setup(system=B1_B2_B3_SYSTEM, user_message=user, tools=[])
 
 
-def _deterministic_summary(raw: str, kind: str) -> str:
-    """Offline summary — deterministic, no LLM call. The 'cheap baseline'
-    against which ArtifactStore must justify itself.
-
-    Heuristic: top-of-file (first 5 lines), then any line containing failure
-    signals (FAILED|Error|assert|WARNING), capped at ~150 tokens. For
-    pytest-shaped output this preserves the failing-test summary line and
-    the assertion line; for grep/diff it just gives a shape sketch.
-    """
-    import re
-    lines = raw.splitlines()
-    head = lines[:5]
-    pat = re.compile(r"FAIL|Error|assert|WARNING|Traceback", re.IGNORECASE)
-    failures = [ln for ln in lines if pat.search(ln)][:20]
-    summary = "\n".join(head + ["..."] + failures)
-    # Truncate to ~150 tokens
-    cap_chars = 150 * 4
-    if len(summary) > cap_chars:
-        summary = summary[:cap_chars] + "\n... [summary truncated]"
-    return summary
+# Backward-compat alias for any external callers (kept until callers migrate).
+# Canonical implementation lives in demo/workloads.py so the demo's SUMMARY
+# policy and the eval's B3/D1 baselines share one codepath.
+_deterministic_summary = lambda raw, kind=None: deterministic_summary(raw)
 
 
 def b3_summary(store: ArtifactStore, fixture_data: str,
                fixture_meta: dict) -> Setup:
-    summary = _deterministic_summary(fixture_data, fixture_meta["kind"])
+    summary = deterministic_summary(fixture_data)
     user = (
         f"Diagnose the root cause of any failure in this {fixture_meta['kind']} "
         f"output for target '{fixture_meta['target']}'. You only have a "

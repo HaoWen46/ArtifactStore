@@ -110,7 +110,6 @@ def supervisor_tools(
     issuer_agent_id: str,
     run_subagent: Callable[[str, str], dict],
     policy: ViewPolicy = ViewPolicy.ARTIFACT,
-    live: bool = False,
 ) -> list[Tool]:
     """Supervisor tool surface.
 
@@ -125,7 +124,7 @@ def supervisor_tools(
             session_id=session_id,
             creator_agent_id=issuer_agent_id,
             kind=kind, target=target,
-            policy=policy, live=live,
+            policy=policy,
         )
         # Under ARTIFACT policy the supervisor sees ONLY the handle, never raw.
         # Under RAW/TRUNCATED/SUMMARY it sees the body — that's the eval baseline.

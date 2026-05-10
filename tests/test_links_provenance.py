@@ -42,7 +42,7 @@ def test_provenance_view_includes_links(tmp_path: Path):
         tool_name="pytest", artifact_type="pytest_failure",
         raw_text=(FIXTURES / "pytest_auth_expiry.log").read_text(),
         creator_agent_id="t", session_id="s",
-        metadata={"target": "auth_expiry", "live": False},
+        metadata={"target": "auth_expiry"},
     )
     other = store.put_artifact(
         tool_name="git", artifact_type="git_diff",

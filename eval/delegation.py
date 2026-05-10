@@ -38,7 +38,8 @@ from artifactstore.tokens import estimate
 from demo.agent import Agent, ModelConfig, Tool
 from demo.runner import _extract_submit_report, load_dotenv
 
-from eval.baselines import _deterministic_summary, _b4_tools
+from demo.workloads import deterministic_summary
+from eval.baselines import _b4_tools
 from eval.driver import (
     FIXTURE_REGISTRY,
     PRICE_PER_MTOK,
@@ -169,7 +170,7 @@ def _empty_sub_metrics() -> dict:
 def _setup_d1_summary(store: ArtifactStore, fixture_data: str,
                       fixture_meta: dict, model: str,
                       max_turns: int) -> tuple[list[Tool], dict]:
-    summary = _deterministic_summary(fixture_data, fixture_meta["kind"])
+    summary = deterministic_summary(fixture_data)
     sub_metrics = _empty_sub_metrics()
 
     def _run_workload_d1(kind: str, target: str) -> dict:
