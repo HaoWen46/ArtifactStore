@@ -133,8 +133,88 @@ def grant(agent: str = typer.Option(...),
 
 @app.command()
 def audit(grant: str = typer.Option(...), db: str = DB_OPT) -> None:
+    """Show every read attempt under a grant — allowed and denied."""
     store = ArtifactStore.init(db)
     typer.echo(json.dumps(store.audit(grant), indent=2))
+
+
+@app.command(name="find-related")
+def find_related(
+    artifact_id: str,
+    grant: str = typer.Option(...),
+    relation: list[str] = typer.Option(None, "--relation",
+                                        help="filter to specific relation(s); repeatable"),
+    db: str = DB_OPT,
+) -> None:
+    """List provenance/causal links from an artifact (caused_by, derived_from, ...)."""
+    store = ArtifactStore.init(db)
+    rows = store.find_related(artifact_id, grant_id=grant,
+                               relations=relation or None)
+    typer.echo(json.dumps(rows, indent=2))
+
+
+@app.command()
+def verify(citation: str, db: str = DB_OPT) -> None:
+    """Resolve a citation 'art_<8hex>/span_<8hex>'. Exit 0 = resolves,
+    exit 4 = does not resolve, exit 5 = malformed."""
+    import sys
+    from artifactstore.cite import BadCitation, parse, verify_resolves
+    store = ArtifactStore.init(db)
+    try:
+        art_id, span_id = parse(citation)
+    except BadCitation as e:
+        typer.secho(f"malformed: {e}", err=True, fg=typer.colors.RED)
+        sys.exit(5)
+    ok = verify_resolves(store.conn, citation)
+    if ok:
+        typer.echo(f"resolved: artifact_id={art_id}  span_id={span_id}")
+        sys.exit(0)
+    typer.secho(f"unresolved: {citation}  (no matching span in store)",
+                err=True, fg=typer.colors.YELLOW)
+    sys.exit(4)
+
+
+@app.command()
+def show(artifact_id: str, db: str = DB_OPT) -> None:
+    """Print artifact metadata + spans + outbound links. Debugging helper —
+    bypasses grants (uses the seeded __supervisor__ grant)."""
+    store = ArtifactStore.init(db)
+    art = store.conn.execute(
+        "SELECT * FROM artifacts WHERE artifact_id = ?", (artifact_id,)
+    ).fetchone()
+    if art is None:
+        typer.secho(f"no such artifact: {artifact_id}", err=True,
+                    fg=typer.colors.RED)
+        raise typer.Exit(code=2)
+    spans = store.conn.execute(
+        "SELECT span_id, span_type, file_path, line_start, line_end, "
+        "       importance, length(text) AS text_chars "
+        "FROM artifact_spans WHERE artifact_id = ? "
+        "ORDER BY COALESCE(importance, 0) DESC, span_id",
+        (artifact_id,),
+    ).fetchall()
+    links = store.conn.execute(
+        "SELECT dst_artifact_id, relation, confidence "
+        "FROM artifact_links WHERE src_artifact_id = ?",
+        (artifact_id,),
+    ).fetchall()
+    payload = {
+        "artifact_id": art["artifact_id"],
+        "session_id": art["session_id"],
+        "creator_agent_id": art["creator_agent_id"],
+        "tool_name": art["tool_name"],
+        "artifact_type": art["artifact_type"],
+        "raw_hash": art["raw_hash"],
+        "token_count": art["token_count"],
+        "sensitivity_label": art["sensitivity_label"],
+        "created_at": art["created_at"],
+        "preview": art["preview"],
+        "metadata": json.loads(art["metadata_json"] or "{}"),
+        "span_count": len(spans),
+        "spans": [dict(r) for r in spans],
+        "outbound_links": [dict(r) for r in links],
+    }
+    typer.echo(json.dumps(payload, indent=2, default=str))
 
 
 if __name__ == "__main__":

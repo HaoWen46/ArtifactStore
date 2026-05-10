@@ -22,7 +22,8 @@ dist/
 .idea/
 .vscode/
 
-eval/runs/
+eval/runs/*
+!eval/runs/.gitkeep
 artifactstore_data/
 
 # Claude Code local-only settings

@@ -67,7 +67,8 @@ returns a report with formal citations the supervisor can verify.
 Implementation: ~2.0 kLOC of Python on SQLite + FTS5, plus a ~150 LOC
 client-side tool-use loop. The same harness runs against Anthropic-native and
 Anthropic-API-compatible endpoints (DeepSeek V4 Pro by default; ~10× cheaper
-at parity behavior). 112 tests pass. Live evaluation: 84 runs across two
+at parity behavior). 123 tests pass — unit, integration, offline e2e, CLI
+integration, and adversarial stress. Live evaluation: 84 runs across two
 sweeps — §11.1 single-agent (4 fixtures × 4 baselines × 3 reps) shows
 ArtifactStore (B4) is the only baseline with 100% task success and EER=1.00
 on every fixture; §11.2 supervisor↔subagent (4 fixtures × 3 strategies × 3
@@ -694,7 +695,7 @@ spending eval budget.
 
 = Testing and Reproducibility
 
-112 tests pass against the prototype. Coverage:
+123 tests pass against the prototype. Coverage:
 
 - *Unit*: schema migration idempotency, ID format, predicate matching for
   every axis, sensitivity ordering, span-prefix path opacity, citation
@@ -720,11 +721,272 @@ spending eval budget.
   out-of-scope link follow, budget exhaustion, path-prefix violations,
   sensitivity ceiling, expired grant). All 10 pass; zero unauthorized
   reads succeed.
+- *CLI integration*: 8 tests in `tests/test_cli.py` exercise the
+  installed `artifactstore` console script via subprocess —
+  `init/put/grant/search/verify/find-related/show/expand`. Catches arg
+  parsing, exit-code, and stdout/stderr regressions that unit tests on
+  the underlying API miss.
 
 The eval driver writes deterministic on-disk output: `config.json`,
 `result.jsonl`, `audit.csv`, `manifest.json` per sweep. `git_rev` and
 `base_url` are recorded in `config.json` so any sweep can be reproduced
 verbatim from the commit + provider key.
+
+= Implementation Techniques and Optimizations
+
+The system isn't just a schema dump. Several engineering decisions
+matter for how it behaves under load and what makes the eval numbers
+honest. Cataloged here so reviewers can map each technique to where it
+shows up.
+
+== Storage and indexing
+
+#list(spacing: 5pt,
+  [*Span-aware preview.* `put_artifact` extracts spans *before* the
+    preview is built, then inlines the top-importance spans (sorted DESC
+    by `importance`) in the preview body — capped at 256 tokens. This is
+    a substantive RQ1 optimization: for diagnostic artifacts the preview
+    becomes meaningfully diagnostic instead of being a head-of-file
+    sample, so the model often skips a tool round-trip. Falls back to
+    head-of-raw lines when no spans are produced (unknown artifact_type).],
+  [*FTS5 with bm25 ranking and LIKE fallback.* Search uses
+    `WHERE artifact_fts MATCH ? ORDER BY bm25(artifact_fts)`. If the
+    FTS5 query parser rejects the input (e.g. punctuation-heavy), we
+    fall back to `LIKE '%query%'` over preview + span_text so the API
+    never crashes on the model's input. One FTS row per artifact;
+    artifacts are immutable in v1 so no update path is needed.],
+  [*Omit-fits token budget enforcement.* Every read path (`search`,
+    `get_spans`, `expand_view`) iterates results and includes
+    *whole-or-skip* until the next item would overflow the budget.
+    Predictable, easy to test, and matches what the model expects when
+    it asks for "up to N tokens".],
+  [*Type-driven span and preview registries.* `extractors.py` and
+    `previews.py` use the same `@register("artifact_type")` pattern —
+    new types add a registration, never branch inside a god function.
+    Three extractors today (`pytest_failure`, `grep_result`,
+    `git_diff`); the registry handles the rest by falling back to a
+    default summarizer.],
+  [*sha256 raw-content hashing.* Every artifact's `raw_hash` is
+    sha256(raw_text utf-8) hex. Cheap, deterministic. Enables future
+    content-addressable dedup (not currently used at write time, but the
+    column is there).],
+)
+
+== Permission enforcement
+
+#list(spacing: 5pt,
+  [*Cumulative grant budget.* `artifact_grants.consumed_tokens` ticks up
+    on every successful read via `account_consumption()`. When
+    `consumed_tokens >= max_tokens`, all further reads under the grant
+    are denied with `denial_reason="grant budget exhausted (X/Y)"`.
+    Per-grant counters are independent — exhausting one grant doesn't
+    affect another. `max_tokens=NULL` means unlimited (the seeded
+    `__supervisor__` grant uses this).],
+  [*Synthetic `__supervisor__` grant seeded by `migrate()`.* Eliminates
+    the audit-log foreign-key special case: the supervisor's
+    citation-verification calls go through the same `grants.check()`
+    pipeline as everyone else, but with an unlimited, all-views grant.
+    No app-level branching for "supervisor" vs "subagent".],
+  [*Path-prefix filter at span-render time, not artifact-level.*
+    Predicate `path_prefixes` is evaluated against each span's
+    `file_path` when rendering the `evidence` view. Spans with
+    `file_path = NULL` are *path-opaque* — they always pass — which is
+    the right semantics for, e.g., a stack-frame span that doesn't carry
+    a path. Artifact-level reads (preview, raw, redacted) are not
+    path-filtered.],
+  [*Schema-migrated `ALTER TABLE` backfill.* `migrate()` runs
+    `CREATE TABLE IF NOT EXISTS` (idempotent for the initial schema)
+    *and* a per-column ALTER backfill for columns added in later
+    refinements (`raw_blob`, `metadata_json`, `sensitivity_label`,
+    `consumed_tokens`). Pre-migration `.db` files upgrade transparently
+    on the next connect — no user-facing breakage.],
+  [*Auto-derived-from links.* `put_artifact(parent_artifact_id=...)`
+    automatically writes `(child, parent, 'derived_from', 1.0)` to
+    `artifact_links` via `INSERT OR IGNORE`. Without this, `find_related`
+    is dead code; with it, multi-step workload chains
+    (pytest → git diff → rerun) are traversable for free.],
+)
+
+== Agent loop robustness
+
+#list(spacing: 5pt,
+  [*Hard `max_turns` cap.* Every agent run is bounded; on overrun,
+    `Agent.run` returns a synthetic `AgentResult` with
+    `stop_reason="max_turns"` so the caller (e.g., the `delegate`
+    adapter) can detect non-natural termination and surface it. We can't
+    rely on `tool_choice` to force `submit_report` (DeepSeek's
+    reasoning models reject named `tool_choice` with HTTP 400), so the
+    cap is the actual safety net.],
+  [*Best-effort `tool_choice` nudge with graceful fallback.* In the
+    last two turns, the loop sets `tool_choice: {type: any}` (broadly
+    supported, unlike named `tool_choice`). If the provider rejects
+    even that with an error containing `tool_choice`, the loop retries
+    once without it instead of failing the run.],
+  [*DeepSeek prompt-cache token accounting.* `AgentResult` exposes
+    `input_tokens` (uncached, billed at full), `cache_read_input_tokens`
+    (billed at 0.1×), and `cache_creation_input_tokens` separately. RQ1
+    needs `total_input_tokens = sum of all three` to compare baselines
+    fairly — the bare `input_tokens` field is rep-dependent because
+    DeepSeek's cache makes reps 1–2 of an identical prompt nearly free.],
+  [*Fail-loud `delegate` adapter.* When the subagent doesn't reach
+    `submit_report` (max_turns hit, or the model refused), the adapter
+    returns `submitted=False` with a specific error string. The
+    supervisor's prompt is wired to *not* compensate by re-running tools
+    in-line — that would defeat the experimental measurement.],
+  [*`ScriptedClient` for offline e2e.* Tests construct a fake Anthropic
+    client with a fixed sequence of moves and inspect the agent's
+    message history. Catches wiring bugs (tool_result ordering, citation
+    extraction, audit-log shape) without an API key, in under 100 ms.],
+)
+
+== Provider portability
+
+#list(spacing: 5pt,
+  [*`ANTHROPIC_BASE_URL` env-var routing.* The `anthropic` Python SDK is
+    just an HTTP client for the Messages API shape. With
+    `ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic` it talks to
+    DeepSeek; unset, it talks to Anthropic. Zero provider-specific code
+    in the harness; one `.env` line decides.],
+  [*Stdlib `.env` loader with `override=True`.* Project-local `.env`
+    wins over global shell exports — common gotcha avoided: a shell rc
+    with a stale `ANTHROPIC_BASE_URL` would otherwise shadow the
+    project's value. Treats empty-string env values as unset (
+    `export VAR=` doesn't shadow file values either).],
+  [*Three pre-flight probes (no eval budget waste).* `--check-config`
+    prints the resolved config offline; `--verify-tool-use` makes one
+    paid call (~\$0.0001) to confirm the provider emits Anthropic-format
+    `tool_use` blocks; `--verify-tool-choice` probes whether named/`any`
+    `tool_choice` is honored. Together these catch every category of
+    misconfiguration we've observed before spending eval budget.],
+)
+
+== Eval methodology
+
+#list(spacing: 5pt,
+  [*Replay-mode-only fixtures.* PLAN §20.6 mandates fixture replay for
+    determinism. Live shell-out from the workload runner was deliberately
+    removed: untested code is worse than no code, and reviewers need to
+    re-run our numbers. Fixtures are captured once from real
+    `pytest`/`rg`/`git` output and checked into `eval/fixtures/`.],
+  [*Per-run isolated SQLite DBs.* Each (fixture × baseline × rep) gets
+    its own `db_<run_id>.sqlite` so the audit log is per-run-clean. The
+    eval driver denormalizes audit rows across runs into `audit.csv`
+    with `run_id` as the foreign key.],
+  [*Gold-truth via diagnosis_keywords + must_contain.* Each fixture
+    ships a sibling `<name>.gold.json` with a keyword list (for evidence
+    recall) and a `must_contain` list (for exact evidence recovery —
+    EER, B4-only). Reproducible, no LLM judge.],
+  [*Deterministic offline summarizer for B3 / D1.* Both single-agent B3
+    and delegation D1 use one shared `deterministic_summary` (head lines
+    + failure-signal regex + 150-token cap). LLM-free, reproducible
+    across runs. The naive baseline ArtifactStore must beat.],
+  [*Cost approximation for the report*. `eval/driver.py` computes per-run
+    `estimated_cost_usd` as
+    `(uncached + cache_creation) × input_rate + cache_read × input_rate × 0.1
+    + output × output_rate`. Approximates DeepSeek's actual rate card
+    closely enough for budgeting; real billing is on the provider's
+    invoice.],
+)
+
+== Implementation caveats
+
+#list(spacing: 5pt,
+  [*Token estimator is approximate.* `artifactstore.tokens.estimate()`
+    uses `tiktoken cl100k_base` if installed, else `len(text) // 4`.
+    Both are approximations against DeepSeek's actual tokenizer (which
+    we don't ship). Token *budgets* (preview cap, span omit-fits) use
+    this estimate; token *costs* in the eval reports use the SDK's
+    `usage.input_tokens` (which is the provider's authoritative number).
+    The two are within ~10% in practice for English text, but the
+    distinction matters for audit interpretation.],
+  [*Citation regex is case-sensitive lowercase.* `art_[0-9a-f]{8}/span_[0-9a-f]{8}`
+    matches our `secrets.token_hex(4)` output. Models occasionally
+    write uppercase hex; the regex misses those. We tighten the prompt
+    to require lowercase (the canonical form) instead of loosening the
+    regex — uppercase span_ids would conflict with the canonical schema.],
+  [*Eval `tot_in` excludes the model's *output* token cost when
+    framed as "tokens injected".* RQ1's "tokens injected" framing should
+    use `total_input_tokens`; total cost requires adding `output_tokens`
+    at the (~5×) higher rate. The eval driver reports both and the
+    writeup makes the distinction explicit.],
+)
+
+= Related Work
+
+ArtifactStore sits at an intersection of three areas — agent harnesses,
+context-management strategies, and DBMS-style access control — and is
+not directly a substitute for any system in any of them.
+
+== Agent context plumbing
+
+*Model Context Protocol (MCP)* (Anthropic, 2024) standardizes how
+external tools expose resources to agents. It addresses the *connection*
+problem (how does an agent reach a database?) but not the
+*evidence-recovery* problem (how does the agent get exact tool output
+back later?). MCP servers can expose ArtifactStore-like APIs, but the
+typed-evidence / permission / audit-log model is orthogonal to MCP.
+
+*Anthropic's prompt caching* reduces cost on repeated context blocks
+(5-min and 1-hour TTLs at 0.1× and full-rate-write multipliers per the
+pricing page). It optimizes *what gets billed* without changing *what
+gets sent*. ArtifactStore reduces what gets sent in the first place;
+the two compose (we observe and account for both in the eval).
+
+*The Claude Agent SDK's subagent isolation pattern* hides intermediate
+work behind worker summaries. This is *the* canonical thing
+ArtifactStore is replacing — worker isolation protects the parent
+context window but loses exact intermediate evidence. Our §11.2 sweep
+quantifies the difference.
+
+== Eval frameworks
+
+*Inspect AI*, *OpenAI Evals*, and *LangChain's evaluation utilities* are
+harnesses for measuring agent behavior. They orchestrate runs and
+collect metrics; they do not provide a typed, permission-scoped
+*store* for the tool outputs the agents produce. ArtifactStore could be
+used inside any of these as a substrate; conversely, a richer eval
+harness would subsume our `eval/driver.py`.
+
+== Retrieval-augmented agents
+
+*RAG systems* (e.g., Pinecone, Weaviate, LlamaIndex) provide semantic
+retrieval over a corpus. The access model is "any vector → any document"
+— there's no per-document type, no scoped grant, no audit log of who
+read what under which capability. ArtifactStore's evidence is *typed*
+(spans with importance, span_type, file_path) and *capability-scoped*
+(predicate + ops + views + budget + expiry). The two compose: a future
+extension could add an embedding index next to FTS5 for semantic span
+retrieval.
+
+== DBMS analogies
+
+ArtifactStore maps directly to classical DBMS concepts:
+
+#table(
+  columns: (1fr, 1fr),
+  inset: 5pt,
+  stroke: 0.5pt + rgb("#cccccc"),
+  align: (left, left),
+  table.header([*DBMS concept*], [*ArtifactStore mapping*]),
+  [Materialized views],
+    [Multi-resolution views (preview/evidence/redacted/raw/provenance)],
+  [Late materialization], [`expand_view` is lazy; only the requested
+    view is rendered],
+  [Capability-based access control], [`artifact_grants` with predicate +
+    ops + views + budget + expiry],
+  [Row/column-level permissions], [`path_prefixes` filter spans;
+    `sensitivity_max` filters artifacts; `allowed_views` filters columns
+    in spirit (raw vs evidence vs redacted)],
+  [Provenance / lineage],
+    [`artifact_links` with `derived_from`, `caused_by`, `supersedes`],
+  [Audit logs], [`artifact_access_log` records every read attempt],
+  [Token-aware retrieval cost], [omit-fits budget enforcement at every
+    read path],
+)
+
+The contribution is not "ArtifactStore is a database" — it is "AI agent
+harnesses need this database-shaped abstraction to handle tool outputs
+safely as supervisor/worker decomposition becomes routine."
 
 = Out of Scope
 
@@ -742,29 +1004,48 @@ end-to-end in an hour.
 
 = Open Issues and Future Work
 
+What's still genuinely open after PLAN §13 build steps 1–9 are all
+complete and the §11.1, §11.2, §11.3 evals are all reported. (Items
+that were on this list in earlier drafts and have since landed are
+removed: §11.2 sweep, §11.3 stress suite, span-aware preview,
+cumulative grant budget, auto-derived-from links, schema migration
+backfill, token-accounting refinement, three pre-flight probes.)
+
 #list(
   marker: ([▸], [·]),
   spacing: 6pt,
   [*Larger fixtures for a clean RQ1 win.* Current fixtures top out at
     3.5K tokens — past the B1/B4 crossover but not by much. A real
-    10K-token CI log would let the eval show B1's input scaling vs B4's
-    handle-bounded plateau.],
+    10K-token CI log would let the eval show B1's input scaling
+    decisively vs B4's handle-bounded plateau. Cheap to capture; we
+    just haven't.],
   [*Real B3 (LLM-summary) baseline.* The deterministic regex summarizer
-    is a strawman; an LLM-summary B3 would be a fairer comparison and
-    cost only ~\$0.001 per fixture-summary.],
-  [*Supervisor↔subagent (D1/D2/D3) eval.* PLAN §11.2 — currently only
-    the demo runner exercises delegation; folding it into the eval grid
-    would round out the evaluation.],
-  [*Variance reduction.* `temperature=0` deterministic mode would tighten
-    error bars; current B4 grep ranges from 5 to 10 turns across reps.],
-  [*Sensitivity inference.* All artifacts default to `internal`; a small
-    heuristic (JWT-shape, `password=` patterns) bumping artifacts to
-    `restricted` would make the redacted view do meaningful work and
-    exercise the `sensitivity_max` predicate axis under realistic
-    conditions.],
-  [*Per-span audit attribution.* Currently `expand_view` logs one row per
-    call; for span-level views, attributing the read to specific spans
-    would give richer RQ4 signal.],
+    is reproducible but a strawman. An LLM-summary B3 would be a fairer
+    apples-to-apples comparison and cost only ~\$0.001 per fixture
+    (one summarization call, amortized over reps).],
+  [*Variance reduction with `temperature=0`.* Current eval uses
+    `temperature=1.0` with 3 reps — error bars are loose, especially
+    on D3 grep (5–10 turns / \$0.005–\$0.014 swing). Deterministic
+    mode plus 5 reps would tighten the §11.2 numbers meaningfully.],
+  [*Sensitivity inference.* All artifacts default to `internal`. A small
+    heuristic (JWT-shape detection, `password=` patterns,
+    `Authorization:` headers) bumping affected artifacts to `restricted`
+    would make the redacted view do meaningful work and exercise the
+    `sensitivity_max` predicate axis under realistic conditions.],
+  [*Per-span audit attribution.* `expand_view` logs one row per call,
+    not per span. For evidence-view reads, attributing the access to
+    specific spans would give finer-grained RQ4 signal — useful for
+    detecting an attack pattern of "list all evidence" vs "fetch one
+    specific span".],
+  [*Embedding index alongside FTS5.* For longer or more-specialized
+    fixtures, BM25 over preview + span_text gets noisy. Adding a small
+    embedding index (e.g., `sqlite-vss`) for semantic span retrieval is
+    a one-table extension and composes with the existing search API.],
+  [*Hash-based deduplication.* `raw_hash` is computed but not used at
+    write time. Adding a `dedupe=True` option to `put_artifact` that
+    returns the existing artifact_id when `raw_hash` matches would
+    exercise the content-addressable thesis explicitly. Two-line change
+    plus a test.],
 )
 
 = Conclusion
