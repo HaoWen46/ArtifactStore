@@ -41,12 +41,14 @@ The authoritative spec is [`ArtifactStore_PLAN.md`](ArtifactStore_PLAN.md).
 
 ## Status
 
-- **102 tests, all green.** Unit (predicate matching, sensitivity ordering,
+- **112 tests, all green.** Unit (predicate matching, sensitivity ordering,
   budget enforcement, citation parsing), integration (extractors against real
   fixtures, all five view materializers), offline e2e (full supervisor↔subagent
-  flow via a scripted Anthropic SDK stub — no key needed), and live smoke.
-- **Live evaluation done.** 48 runs across 4 fixtures × 4 baselines × 3 reps
-  against `deepseek-v4-pro`. ~$0.10. Findings below.
+  flow via a scripted Anthropic SDK stub — no key needed), live smoke, and
+  10 adversarial permission stress tests (PLAN §11.3).
+- **All three eval studies done.** §11.1 single-agent (48 runs), §11.2
+  supervisor↔subagent (36 runs), §11.3 adversarial (10 offline tests).
+  ~$0.30 total live spend. Findings below.
 - **Provider-agnostic.** Default `deepseek-v4-pro` via DeepSeek's
   Anthropic-compatible endpoint (~10× cheaper than Anthropic Sonnet 4.5);
   swap to native Anthropic with one env var.
@@ -109,9 +111,17 @@ via `artifactstore audit`.
 ### Evaluation
 
 ```bash
-# 4 fixtures × 4 baselines × 3 reps = 48 runs (~$0.10 total on DeepSeek)
+# §11.1 single-agent (B1/B2/B3/B4): 48 runs, ~$0.10
 uv run python -m eval --reps 3
 # -> writes eval/runs/<UTC-iso>/{config.json, result.jsonl, audit.csv, manifest.json}
+
+# §11.2 supervisor↔subagent delegation (D1/D2/D3): 36 runs, ~$0.19
+uv run python -m eval --mode delegation --reps 3
+# -> writes eval/runs/delegation_<UTC-iso>/{config.json, result.jsonl, manifest.json}
+
+# §11.3 adversarial permission stress (offline, no API key, no spend)
+uv run pytest tests/test_stress.py -v
+# -> 10 scenarios, 0 unauthorized reads succeed
 ```
 
 ---
@@ -147,10 +157,10 @@ seen in practice before spending eval budget:
 
 ## Headline evaluation results
 
-48 live runs, `deepseek-v4-pro`, 4 fixtures (pytest small/large, ripgrep,
-git-diff), 4 baselines, 3 reps each. Detailed analysis:
-[`notes/eval_writeup.md`](notes/eval_writeup.md). Per-baseline aggregates
-(n=12):
+84 live runs against `deepseek-v4-pro` plus 10 offline stress scenarios.
+Detailed analysis: [`notes/eval_writeup.md`](notes/eval_writeup.md).
+
+### §11.1 single-agent (n=12 per baseline, 48 runs total)
 
 | baseline | task success | avg evidence recall | avg total tokens (in) | avg cost |
 |---|---:|---:|---:|---:|
@@ -159,25 +169,56 @@ git-diff), 4 baselines, 3 reps each. Detailed analysis:
 | **B3** offline summary | 50% | 0.45 | 256 | $0.0009 |
 | **B4** ArtifactStore | **100%** | **0.94** | 21,572 | $0.0051 |
 
-The headline framing is **not** "B4 saves the most tokens" — it's:
-
 > ArtifactStore (B4) is the only baseline that combines reliable success
 > *and* exact-evidence recovery (EER=1.00 on every fixture) *and* formal
 > citations (3-7 per run, all resolve via `cite.verify_resolves`) *and*
 > per-read audit-log signal. B2 and B3 strictly lose evidence in
 > fixture-dependent ways. B1 doesn't scale.
 
-For RQ1 (token efficiency), B4's `tot_in` is higher than B1's because
-multi-turn loops accumulate context across turns. The fairer comparison is
-**cost-per-success**: at 3.5K-token fixtures, B4 costs $0.0032 vs B1's
-$0.0025 — a 28% premium for strict EER. The crossover happens around 5K
-tokens; B1's input scales with fixture size while B4's stays bounded by the
-model's tool-use intent.
+### §11.2 supervisor↔subagent delegation (n=12 per strategy, 36 runs)
 
-For RQ4 (permission enforcement), the demo runner with a narrow grant
-blocks 3 unauthorized `view='raw'` reads organically and logs them with
-specific `denial_reason` strings — a non-zero RQ4 signal under realistic
-agent behavior.
+| strategy | task success | avg recall | avg parent input | avg sub input | avg cost |
+|---|---:|---:|---:|---:|---:|
+| **D1** SUMMARY (offline) | 42% | 0.50 | 3,065 | 402 | $0.0025 |
+| **D2** FULL_CONTEXT | 100% | 0.93 | 6,010 | 1,664 | $0.0042 |
+| **D3** ArtifactStore SCOPED | **100%** | 0.92 | **6,294** | 27,137 | $0.0090 |
+
+> On the 3.5K-token fixture, D3's parent context = 6,708 vs D2's 11,716 —
+> **D3 cuts supervisor context by 43%** as fixtures grow. D3 is also the
+> only strategy with formal citations (avg 6.4/run) and audit-log signal
+> (5 unauthorized reads blocked organically across 12 D3 runs). Crossover
+> with D2 sits around 3-4K raw tokens; below that, D2 is cheaper.
+
+### §11.3 adversarial permission stress (10 offline tests)
+
+```text
+pytest tests/test_stress.py -v
+==========================================================
+test_secret_values_blocked_in_raw                  PASSED
+test_prompt_injection_cannot_fabricate_citation    PASSED
+test_disallowed_artifact_id_blocked                PASSED
+test_raw_view_blocked_when_only_evidence_allowed   PASSED
+test_find_related_filters_out_of_scope_targets     PASSED
+test_grant_budget_exhaustion_under_attack          PASSED
+test_path_prefix_filters_spans_at_read_time        PASSED
+test_sensitivity_ceiling_blocks_higher_labels      PASSED
+test_expired_grant_denies_all_reads                PASSED
+test_audit_log_every_denial_has_reason             PASSED
+==========================================================
+10 passed.  Zero unauthorized reads succeed.
+```
+
+Every denial logs a specific, parseable `denial_reason`: `view 'raw' not
+in allowed_views`, `artifact does not match grant predicate`, `grant
+budget exhausted (X/Y tokens)`, `grant expired`, etc.
+
+### Combined RQ4 evidence
+
+- §11.3 stress suite: 9 attack vectors, 0 unauthorized reads, all logged.
+- §11.2 organic denials: 5 unauthorized reads attempted in 12 D3 runs, 0 succeeded.
+- Demo runner with narrow grants: 3 raw-view attempts blocked.
+
+**Zero unauthorized reads succeed across any measurement surface.**
 
 ---
 
@@ -201,7 +242,8 @@ demo/                 ← the test bench (PLAN §20)
   runner.py           ← demo entrypoint + .env loader + --check-config / --verify-* probes
 eval/
   fixtures/           ← captured pytest/grep/git-diff outputs + .gold.json truth files
-  driver.py           ← PLAN §11.1 sweep across 4 baselines × N fixtures × M reps
+  driver.py           ← PLAN §11.1 sweep: 4 baselines (B1/B2/B3/B4) × N fixtures × M reps
+  delegation.py       ← PLAN §11.2 sweep: 3 strategies (D1/D2/D3) × N fixtures × M reps
   baselines.py        ← B1/B2/B3/B4 setup builders
   metrics.py          ← evidence_recall, citation_validity, exact_evidence_recovery, blocked_reads
   runs/               ← gitignored output: config.json, result.jsonl, audit.csv, manifest.json

@@ -64,12 +64,17 @@ its transcript and delegates inspection to a subagent under a scoped grant;
 the subagent retrieves exact evidence through controlled tool calls and
 returns a report with formal citations the supervisor can verify.
 
-Implementation: ~1.7 kLOC of Python on SQLite + FTS5, plus a ~150 LOC
+Implementation: ~2.0 kLOC of Python on SQLite + FTS5, plus a ~150 LOC
 client-side tool-use loop. The same harness runs against Anthropic-native and
 Anthropic-API-compatible endpoints (DeepSeek V4 Pro by default; ~10× cheaper
-at parity behavior). 102 tests pass; live evaluation across 4 fixtures × 4
-baselines × 3 reps shows ArtifactStore (B4) is the only baseline with both
-100% task success and 100% exact-evidence recovery on every fixture.
+at parity behavior). 112 tests pass. Live evaluation: 84 runs across two
+sweeps — §11.1 single-agent (4 fixtures × 4 baselines × 3 reps) shows
+ArtifactStore (B4) is the only baseline with 100% task success and EER=1.00
+on every fixture; §11.2 supervisor↔subagent (4 fixtures × 3 strategies × 3
+reps) shows D3 (scoped ArtifactStore delegation) cuts parent context by 43%
+on 3.5K-token fixtures and is the only strategy producing formal citations
+and audit-log signal. §11.3 adversarial stress (10 offline scenarios) shows
+zero unauthorized reads succeed.
 
 = Motivation and Thesis
 
@@ -569,6 +574,95 @@ framings:
   noisy fixtures (where B2/B3 strictly fail), it costs roughly the same
   as raw injection while being the only baseline a supervisor can trust.
 
+== Supervisor↔subagent delegation (PLAN §11.2)
+
+A second eval, fundamentally different question: not "what context
+strategy works for a single agent" but "when delegating, what does the
+*supervisor* keep in its context vs the subagent's." Three strategies,
+36 runs, ~\$0.19:
+
+#table(
+  columns: (auto, auto, auto, auto, auto, auto, auto),
+  inset: 5pt,
+  stroke: 0.5pt + rgb("#cccccc"),
+  align: (left, right, right, right, right, right, right),
+  table.header(
+    [*Strategy*], [*succ*], [*recall*], [*par_in*], [*sub_in*], [*tot_in*], [*cost*],
+  ),
+  [D1 SUMMARY],         [42%], [0.50], [3,065], [402],    [3,467],  [\$0.0025],
+  [D2 FULL_CONTEXT],   [100%], [0.93], [6,010], [1,664],  [7,674],  [\$0.0042],
+  [*D3 SCOPED*], [*100%*], [*0.92*], [*6,294*], [*27,137*], [*33,431*], [*\$0.0090*],
+)
+
+Headline §11.2 finding: *D3's parent-context savings are conditional on
+fixture size*. On the `pytest_large_run` fixture (3,500 tok raw), D3
+parent input = 6,708 vs D2's 11,716 — D3 cuts parent context by 43%. On
+small fixtures (~few hundred tok raw), D3's parent is *larger* than D2's
+because D3 makes 3 LLM calls (`run_workload` → `create_grant` →
+`delegate`) vs D2's 2 calls, and per-turn overhead exceeds the
+per-payload savings. *The crossover sits around 3-4K raw tokens.*
+
+D3 is also the only strategy that produces formal citations (avg 6.4
+per run, all resolve) and surfaces RQ4 signal organically (5 unauthorized
+reads blocked across 12 D3 runs; 0 in D1/D2 because they have no
+permission surface). The cost penalty over D2 is ~2× — buying formal
+citations, audit signal, and bounded-parent-context.
+
+Honest framing for §11.2: ArtifactStore is *not* always cheaper as a
+delegation strategy. For small fixtures, raw forwarding (D2) is cheaper.
+For large fixtures, ArtifactStore wins on parent-context, citations, and
+audit simultaneously — the only strategy a supervisor can actually trust
+when payloads grow.
+
+== Adversarial permission stress (PLAN §11.3)
+
+Ten offline stress tests (`tests/test_stress.py`, no API spend) cover
+every PLAN §11.3 adversarial scenario plus related defenses:
+
+#table(
+  columns: (1.2fr, 1fr),
+  inset: 5pt,
+  stroke: 0.5pt + rgb("#cccccc"),
+  align: (left, left),
+  table.header([*Scenario*], [*Denial signal*]),
+  [secret values + raw denied; redacted strips them],
+    [`view 'raw' not in allowed_views`; redaction strips JWTs/secrets],
+  [prompt injection cannot fabricate citations],
+    [`cite.verify_resolves` rejects unknown span_ids],
+  [out-of-session artifact_id requested],
+    [`artifact does not match grant predicate`],
+  [raw_view requested under evidence-only grant],
+    [`view 'raw' not in allowed_views`],
+  [following link to out-of-scope artifact],
+    [link listed via find_related; expand_view denied on follow],
+  [grant budget exhaustion under attack],
+    [`grant budget exhausted (X/Y tokens)`],
+  [path-prefix filter denies out-of-prefix spans],
+    [filtered at render time in `evidence` view],
+  [sensitivity ceiling blocks higher-labeled artifacts],
+    [`artifact does not match grant predicate`],
+  [expired grant denies all reads], [`grant expired`],
+  [audit invariant: every denial has non-null reason], [aggregate over above],
+)
+
+*Result: zero unauthorized reads succeed across all 10 scenarios.* Every
+denial is logged with a specific, parseable `denial_reason`. The §11.3
+suite verifies the access-control surface as a unit-test contract;
+§11.2's denials emerge organically from narrow grants in the live demo
+flow. Both produce comparable signal via `grants.check()`.
+
+== RQ4 summary across §11.2 + §11.3
+
+For permission enforcement, the combined evidence is:
+
+- §11.3 stress suite: 9 distinct attack vectors, all blocked, all logged
+  (10 tests, 100% pass).
+- §11.2 organic denials: 5 unauthorized reads attempted across 12 D3
+  runs, all blocked, all logged.
+- Demo runner with narrow grants: 3 raw-view attempts blocked in run 3.
+
+Zero unauthorized reads succeed in any measurement surface.
+
 = Provider-Agnostic Implementation
 
 The agent loop uses the `anthropic` Python SDK as its HTTP client; the
@@ -600,7 +694,7 @@ spending eval budget.
 
 = Testing and Reproducibility
 
-102 tests pass against the prototype. Coverage:
+112 tests pass against the prototype. Coverage:
 
 - *Unit*: schema migration idempotency, ID format, predicate matching for
   every axis, sensitivity ordering, span-prefix path opacity, citation
@@ -620,6 +714,12 @@ spending eval budget.
 - *Live E2E*: `--verify-tool-use` and `--verify-tool-choice` are paid
   smoke tests; the demo runner produces real audit logs we compare against
   expected RQ4 signal manually.
+- *Adversarial stress (PLAN §11.3)*: 10 tests in `tests/test_stress.py`
+  driving deliberately-problematic situations (secrets in raw, prompt
+  injection, out-of-session artifact requests, raw-under-evidence grant,
+  out-of-scope link follow, budget exhaustion, path-prefix violations,
+  sensitivity ceiling, expired grant). All 10 pass; zero unauthorized
+  reads succeed.
 
 The eval driver writes deterministic on-disk output: `config.json`,
 `result.jsonl`, `audit.csv`, `manifest.json` per sweep. `git_rev` and
@@ -671,25 +771,34 @@ end-to-end in an hour.
 
 ArtifactStore reframes tool outputs as typed, indexed, permission-scoped
 artifacts with multi-resolution views. The implementation is a thin
-SQLite + FTS5 layer (~1.7 kLOC) plus a small client-side agent loop.
-Across 48 live runs against DeepSeek V4 Pro, the ArtifactStore baseline
-(B4) is the only configuration with both 100% diagnostic-task success
-and 100% exact-evidence recovery on every fixture, and the only baseline
-with formally verifiable citations. Its cost is competitive with raw
-injection at moderate fixture sizes and dominates as fixtures grow. The
-permission-enforcement story (RQ4) is exercised end-to-end by the demo
-runner: subagents under narrow grants have their disallowed reads
-blocked and audit-logged, with zero unauthorized reads getting through.
+SQLite + FTS5 layer (~2.0 kLOC) plus a small client-side agent loop.
+
+Across 84 live runs against DeepSeek V4 Pro plus 10 offline stress
+scenarios:
+
+- *§11.1 single-agent*: ArtifactStore (B4) is the only configuration with
+  both 100% diagnostic-task success and 100% exact-evidence recovery on
+  every fixture, and the only baseline with formally verifiable citations.
+- *§11.2 supervisor↔subagent*: ArtifactStore-scoped delegation (D3) is
+  the only strategy with bounded supervisor context as fixtures grow
+  (43% parent-context reduction at 3.5K-token fixtures vs full-context
+  forwarding), the only strategy producing citations the supervisor can
+  verify, and the only strategy with audit-log signal.
+- *§11.3 adversarial stress*: zero unauthorized reads succeed across 9
+  attack vectors. Every denial logs a specific `denial_reason`.
 
 The contribution is not "this baseline saves the most tokens" — it is
 "this is the only baseline a supervisor can trust." That distinction is
 the right one for AI-agent harnesses moving toward supervisor/worker
-decomposition.
+decomposition. The permission-enforcement story (RQ4) reaches the
+zero-unauthorized-reads bar across every measurement surface we built.
 
 #v(0.5em)
 #line(length: 100%)
 #text(size: 9pt, style: "italic")[
   Source: #link("https://github.com/HaoWen46/ArtifactStore"). Reproduce
-  any sweep with `uv run python -m eval --reps 3` after configuring
-  `.env` per `.env.example`. ~\$0.10 per 48-run sweep.
+  the §11.1 sweep with `uv run python -m eval --reps 3` (~\$0.10), the
+  §11.2 sweep with `uv run python -m eval --mode delegation --reps 3`
+  (~\$0.19), and §11.3 with `uv run pytest tests/test_stress.py`
+  (offline) after configuring `.env` per `.env.example`.
 ]
