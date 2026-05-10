@@ -101,6 +101,8 @@ def make_preview(artifact_type: str, raw_text: str, raw_tokens: int,
     fn = _REGISTRY.get(artifact_type, _default_summary)
     summary = fn(raw_text).strip().replace("\n", " ")
     header = f"[{artifact_type} | {summary} | {raw_tokens} tokens]"
+    # -1 reserves room for the "\n" we insert between header and body
+    # below. Without it, header+body could overshoot the cap by one token.
     body_budget = PREVIEW_TOKEN_BUDGET - estimate(header) - 1
     if spans:
         body = _spans_inline(spans, body_budget)

@@ -431,10 +431,15 @@ def _run_one(*, fixture: str, strategy: str, rep: int, model: str,
         tools=sup_tools,
         config=ModelConfig(model=model, max_turns=max_turns),
     )
-    user = (f"Diagnose the root cause of any failure in the "
-            f"{fixture_meta['kind']} workload for target "
-            f"'{fixture_meta['target']}'. Delegate the diagnosis to a "
-            f"subagent and produce a final answer.")
+    if fixture_meta.get("reveal_target", True):
+        diag_clause = (f"for target '{fixture_meta['target']}'")
+    else:
+        diag_clause = ("(the workload contains multiple failures; pick the "
+                       "most diagnostically informative one and tell us "
+                       "which you chose)")
+    user = (f"Diagnose the root cause of a failure in the "
+            f"{fixture_meta['kind']} workload {diag_clause}. Delegate the "
+            f"diagnosis to a subagent and produce a final answer.")
 
     started = time.time()
     error: str | None = None

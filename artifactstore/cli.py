@@ -1,9 +1,11 @@
 """CLI surface tracks ArtifactStore_PLAN.md §13."""
 from __future__ import annotations
 
+import functools
 import json
 import re
 from pathlib import Path
+from typing import Any, Callable
 
 import typer
 
@@ -17,20 +19,25 @@ app = typer.Typer(no_args_is_help=True, add_completion=False,
                   pretty_exceptions_enable=False)
 
 
-@app.callback()
-def _catch(ctx: typer.Context) -> None:
-    """No-op root callback (lets AccessDenied propagate to the wrapper below)."""
-    pass
+def _denial_safe(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Wrap a command body: convert AccessDenied → exit code 3 with a
+    one-line stderr message. Lives at command level so both production
+    `main()` (subprocess) and `typer.testing.CliRunner` (in-process)
+    surface the same exit code and shape — without this, in-process
+    tests would see a leaked exception."""
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return fn(*args, **kwargs)
+        except AccessDenied as e:
+            typer.secho(f"denied: {e}", err=True, fg=typer.colors.RED)
+            raise typer.Exit(code=3)
+    return wrapper
 
 
 def main() -> None:
-    """Console-script entrypoint that turns AccessDenied into a clean exit."""
-    import sys
-    try:
-        app()
-    except AccessDenied as e:
-        typer.secho(f"denied: {e}", err=True, fg=typer.colors.RED)
-        sys.exit(3)
+    """Console-script entrypoint."""
+    app()
 
 DB_OPT = typer.Option("artifactstore.db", "--db", help="SQLite database path")
 
@@ -78,6 +85,7 @@ def put(
 
 
 @app.command()
+@_denial_safe
 def search(query: str, grant: str = typer.Option(...), db: str = DB_OPT,
            limit: int = 5, token_budget: int = 1000) -> None:
     store = ArtifactStore.init(db)
@@ -87,6 +95,7 @@ def search(query: str, grant: str = typer.Option(...), db: str = DB_OPT,
 
 
 @app.command()
+@_denial_safe
 def spans(artifact_id: str, grant: str = typer.Option(...), db: str = DB_OPT,
           span_type: list[str] = typer.Option(None, "--type"),
           token_budget: int = 1000) -> None:
@@ -98,6 +107,7 @@ def spans(artifact_id: str, grant: str = typer.Option(...), db: str = DB_OPT,
 
 
 @app.command()
+@_denial_safe
 def expand(artifact_id: str, view: str = typer.Option(...),
            grant: str = typer.Option(...), db: str = DB_OPT,
            token_budget: int = 2000) -> None:
@@ -139,6 +149,7 @@ def audit(grant: str = typer.Option(...), db: str = DB_OPT) -> None:
 
 
 @app.command(name="find-related")
+@_denial_safe
 def find_related(
     artifact_id: str,
     grant: str = typer.Option(...),

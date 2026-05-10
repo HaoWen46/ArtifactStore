@@ -63,6 +63,22 @@ class Setup:
     extra: dict[str, Any] = field(default_factory=dict)
 
 
+def _diagnostic_phrase(fixture_meta: dict) -> str:
+    """Build the per-task diagnostic instruction. For fixtures where the
+    target is genuinely a single failure ('auth_expiry' in a 1-failure
+    log), naming it is informative not biasing. For multi-failure
+    fixtures we hide the target and ask the agent to discover."""
+    kind = fixture_meta["kind"]
+    if fixture_meta.get("reveal_target", True):
+        return (f"Diagnose the root cause of any failure in this {kind} "
+                f"output for target '{fixture_meta['target']}'. Be specific.")
+    return (f"Diagnose the root cause of THE most diagnostically informative "
+            f"failure in this {kind} output. The output may contain multiple "
+            f"failures; pick the one with the most actionable evidence "
+            f"(e.g. a smoking-gun log line, an explicit error message). "
+            f"Be specific about which failure you chose.")
+
+
 # ---------------------------------------------------------------------------
 # B1 / B2 / B3 — single-message context, no tools.
 # ---------------------------------------------------------------------------
@@ -70,8 +86,7 @@ class Setup:
 def b1_raw(store: ArtifactStore, fixture_data: str,
            fixture_meta: dict) -> Setup:
     user = (
-        f"Diagnose the root cause of any failure in this {fixture_meta['kind']} "
-        f"output for target '{fixture_meta['target']}'. Be specific.\n\n"
+        f"{_diagnostic_phrase(fixture_meta)}\n\n"
         f"<output>\n{fixture_data}\n</output>"
     )
     return Setup(system=B1_B2_B3_SYSTEM, user_message=user, tools=[])
@@ -86,9 +101,9 @@ def b2_truncated(store: ArtifactStore, fixture_data: str,
         head + f"\n... [truncated; total {raw_tokens} tokens]"
     )
     user = (
-        f"Diagnose the root cause of any failure in this {fixture_meta['kind']} "
-        f"output for target '{fixture_meta['target']}'. The output was "
-        f"truncated to {max_tokens} tokens for context efficiency.\n\n"
+        f"{_diagnostic_phrase(fixture_meta)} "
+        f"The output was truncated to {max_tokens} tokens for context "
+        f"efficiency.\n\n"
         f"<output truncated=\"true\">\n{body}\n</output>"
     )
     return Setup(system=B1_B2_B3_SYSTEM, user_message=user, tools=[])
@@ -104,9 +119,8 @@ def b3_summary(store: ArtifactStore, fixture_data: str,
                fixture_meta: dict) -> Setup:
     summary = deterministic_summary(fixture_data)
     user = (
-        f"Diagnose the root cause of any failure in this {fixture_meta['kind']} "
-        f"output for target '{fixture_meta['target']}'. You only have a "
-        f"summary; the raw output was not preserved.\n\n"
+        f"{_diagnostic_phrase(fixture_meta)} "
+        f"You only have a summary; the raw output was not preserved.\n\n"
         f"<summary>\n{summary}\n</summary>"
     )
     return Setup(system=B1_B2_B3_SYSTEM, user_message=user, tools=[])
@@ -212,11 +226,10 @@ def b4_artifactstore(store: ArtifactStore, fixture_data: str,
         max_tokens=10000, ttl_seconds=3600,
     )
     user = (
-        f"Diagnose the root cause of any failure in this {fixture_meta['kind']} "
-        f"output for target '{fixture_meta['target']}'. The raw output is "
-        f"stored in ArtifactStore — your handle is `{artifact_id}` "
-        f"(type: {fixture_meta['artifact_type']}). Use the artifact_* tools "
-        f"to inspect evidence on demand."
+        f"{_diagnostic_phrase(fixture_meta)} "
+        f"The raw output is stored in ArtifactStore — your handle is "
+        f"`{artifact_id}` (type: {fixture_meta['artifact_type']}). Use the "
+        f"artifact_* tools to inspect evidence on demand."
     )
     return Setup(
         system=B4_SYSTEM, user_message=user,

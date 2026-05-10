@@ -67,10 +67,13 @@ returns a report with formal citations the supervisor can verify.
 Implementation: ~2.0 kLOC of Python on SQLite + FTS5, plus a ~150 LOC
 client-side tool-use loop. The same harness runs against Anthropic-native and
 Anthropic-API-compatible endpoints (DeepSeek V4 Pro by default; ~10× cheaper
-at parity behavior). 140 tests pass — unit, integration, offline e2e, CLI
-integration, adversarial stress, and review-driven regression tests for
-self-review-discovered weaknesses (long-line truncation, sensitivity
-self-labeling bypass, fence-post budget enforcement, citation case-handling). Live evaluation: 84 runs across two
+at parity behavior). 171 tests pass — unit, integration, offline e2e, CLI
+integration (subprocess and in-process), adversarial stress, eval-baseline
+unit tests, FTS5-fallback robustness, and review-driven regression tests
+for self-review-discovered weaknesses (long-line truncation, sensitivity
+self-labeling bypass, fence-post budget enforcement, citation case-handling).
+A target-leak control sweep confirms the eval's headline numbers are
+robust to whether the agent is told which failure to focus on. Live evaluation: 84 runs across two
 sweeps — §11.1 single-agent (4 fixtures × 4 baselines × 3 reps) shows
 ArtifactStore (B4) is the only baseline with 100% task success and EER=1.00
 on every fixture; §11.2 supervisor↔subagent (4 fixtures × 3 strategies × 3
@@ -577,6 +580,38 @@ framings:
   noisy fixtures (where B2/B3 strictly fail), it costs roughly the same
   as raw injection while being the only baseline a supervisor can trust.
 
+=== Robustness to target hint (target-leak control)
+
+The §11.1 task prompt names the fixture's `target` (e.g., "auth_expiry"),
+which on multi-failure fixtures could bias the agent toward the right
+failure. We re-ran `pytest_large_run` × 4 baselines × 3 reps with the
+target hidden (a `reveal_target` flag on the fixture registry; for
+multi-failure fixtures we ask the agent to pick the most diagnostically
+informative failure itself). The headline numbers were unchanged:
+
+#table(
+  columns: (auto, auto, auto, auto),
+  inset: 5pt,
+  stroke: 0.5pt + rgb("#cccccc"),
+  align: (left, right, right, right),
+  table.header(
+    [*Baseline*], [*recall (target shown)*], [*recall (target hidden)*], [*Δ*],
+  ),
+  [B1 RAW],         [0.93], [0.93], [0],
+  [B2 TRUNCATED],   [0.00], [0.00], [0],
+  [B3 SUMMARY],     [0.20], [0.20], [0],
+  [*B4 ARTIFACT*], [*1.00*], [*1.00*], [*0*],
+)
+
+The B4 model finds `auth_expiry` among 5 failures because the WARNING
+log line is the most diagnostically rich signal in the fixture — the
+same property that makes the bug interesting in the first place makes
+it the natural pick under "find the most informative failure" framing.
+B2/B3 still fail in the same fixture-dependent ways (truncation cuts
+past the WARNING; the heuristic summary preserves it but loses
+keywords). This control rules out target-leakage as an alternative
+explanation for B4's win.
+
 == Supervisor↔subagent delegation (PLAN §11.2)
 
 A second eval, fundamentally different question: not "what context
@@ -697,7 +732,9 @@ spending eval budget.
 
 = Testing and Reproducibility
 
-140 tests pass against the prototype. Coverage:
+171 tests pass against the prototype. Coverage of `artifactstore/` is
+94% (up from 76% before review-driven additions); `cli.py` jumped from
+0% to 92% after adding in-process tests via `typer.testing.CliRunner`.
 
 - *Unit*: schema migration idempotency, ID format, predicate matching for
   every axis, sensitivity ordering, span-prefix path opacity, citation
@@ -735,6 +772,20 @@ spending eval budget.
   asserting their fixes. Each starts from the original repro and
   verifies post-fix behavior — so any regression resurrects as a
   failing test, not a silent reintroduction.
+- *FTS5 fallback + injection*: 6 tests in
+  `tests/test_search_robustness.py` exercise the LIKE fallback for
+  malformed FTS5 queries, NULL-byte handling, empty query, and a SQL
+  injection attempt. The fallback path was at 0% coverage before.
+- *Eval setup builders* (`tests/test_eval_baselines.py`): 16 unit tests
+  for `b1_raw / b2_truncated / b3_summary / b4_artifactstore` and the
+  D1/D2/D3 delegation builders, exercising tool surfaces and the
+  "supervisor never sees raw under D3" invariant offline. Previously
+  these modules had 0% coverage outside of live sweeps.
+- *In-process CLI* (`tests/test_cli_inprocess.py`): 9 tests via
+  `typer.testing.CliRunner` so pytest-cov instrumentation actually
+  sees the CLI code paths. Complements the subprocess tests in
+  `tests/test_cli.py` (which catch packaging regressions but don't
+  count toward coverage).
 
 The eval driver writes deterministic on-disk output: `config.json`,
 `result.jsonl`, `audit.csv`, `manifest.json` per sweep. `git_rev` and

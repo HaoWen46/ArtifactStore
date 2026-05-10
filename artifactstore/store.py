@@ -104,18 +104,26 @@ class ArtifactStore:
              preview_text, final_label, json.dumps(metadata or {})),
         )
 
+        # Batch the span inserts so an artifact with N spans is one round-trip
+        # through the SQLite driver instead of N. Cheap perf win at our scale;
+        # matters more on artifacts with hundreds of spans (think: large
+        # ripgrep output, multi-failure pytest log) where the per-INSERT
+        # overhead would otherwise dominate ingest time.
+        span_rows: list[tuple] = []
         span_texts: list[str] = []
         for stype, fpath, lstart, lend, text, importance in spans:
             sid = new_id("span")
-            self.conn.execute(
+            span_rows.append((sid, aid, stype, fpath, lstart, lend, text,
+                              estimate(text), importance))
+            span_texts.append(text)
+        if span_rows:
+            self.conn.executemany(
                 """INSERT INTO artifact_spans(
                      span_id, artifact_id, span_type, file_path,
                      line_start, line_end, text, token_count, importance
                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (sid, aid, stype, fpath, lstart, lend, text,
-                 estimate(text), importance),
+                span_rows,
             )
-            span_texts.append(text)
 
         # Auto-link to parent (provenance). PLAN §7.3 'derived_from' relation.
         # Without this, find_related is dead code; with it, every multi-step

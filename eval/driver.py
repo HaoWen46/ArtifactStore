@@ -57,23 +57,37 @@ PRICE_PER_MTOK = {
 }
 
 
-# Map fixture filename -> (kind, target, artifact_type) so workloads.py
-# config and eval config don't drift.
-FIXTURE_REGISTRY: dict[str, dict[str, str]] = {
+# Map fixture filename -> (kind, target, artifact_type, ext, reveal_target)
+# so workloads.py config and eval config don't drift.
+#
+# `reveal_target` controls whether the eval task prompt names the specific
+# target. For single-failure fixtures (auth_expiry, single diff), revealing
+# is harmless — there's only one failure to find. For multi-failure
+# fixtures (pytest_large_run, 5 failures), revealing biases the agent
+# toward the right one and inflates recall across all baselines. Setting
+# reveal_target=False makes the agent discover, which is the more honest
+# diagnostic test. We document the methodology in the report.
+FIXTURE_REGISTRY: dict[str, dict] = {
     "pytest_auth_expiry":     {"kind": "pytest", "target": "auth_expiry",
                                 "artifact_type": "pytest_failure",
-                                "ext": ".log"},
-    # ~3500-token pytest log with 5 failures. Tests RQ1 token efficiency:
-    # B1 must inject all 3500; B4 fetches only the relevant spans.
+                                "ext": ".log",
+                                "reveal_target": True},
+    # ~3500-token pytest log with 5 failures. We DON'T reveal which
+    # failure to focus on — the agent has to discover the auth_expiry
+    # bug among the others. Without this flag the eval would tell the
+    # agent the answer.
     "pytest_large_run":       {"kind": "pytest", "target": "auth_expiry",
                                 "artifact_type": "pytest_failure",
-                                "ext": ".log"},
+                                "ext": ".log",
+                                "reveal_target": False},
     "rg_grep_noise":          {"kind": "grep",   "target": "todos",
                                 "artifact_type": "grep_result",
-                                "ext": ".txt"},
+                                "ext": ".txt",
+                                "reveal_target": True},
     "git_diff_auth_refactor": {"kind": "git",    "target": "auth_diff",
                                 "artifact_type": "git_diff",
-                                "ext": ".diff"},
+                                "ext": ".diff",
+                                "reveal_target": True},
 }
 
 
