@@ -142,22 +142,22 @@ evidence through scoped queries when needed.
                  │          artifact_find_related│               │   ││
                  │          submit_report        │               │   ││
                  └───────────────────────────────┘               ▼   ▼▼
-                                                       ┌────────────────────┐
-                                                       │ ArtifactStore API  │
-                                                       │ search/get_spans/  │
-                                                       │ expand_view/...    │
-                                                       │ create_grant/audit │
-                                                       └─────────┬──────────┘
-                                                                 ▼
-                                                       ┌────────────────────┐
-                                                       │ SQLite + FTS5      │
-                                                       │   artifacts        │
-                                                       │   artifact_spans   │
-                                                       │   artifact_links   │
-                                                       │   artifact_grants  │
+                                                       ┌───────────────────────┐
+                                                       │ ArtifactStore API     │
+                                                       │ search/get_spans/     │
+                                                       │ expand_view/...       │
+                                                       │ create_grant/audit    │
+                                                       └──────────┬────────────┘
+                                                                  ▼
+                                                       ┌───────────────────────┐
+                                                       │ SQLite + FTS5         │
+                                                       │   artifacts           │
+                                                       │   artifact_spans      │
+                                                       │   artifact_links      │
+                                                       │   artifact_grants     │
                                                        │   artifact_access_log │
-                                                       │   artifact_fts     │
-                                                       └────────────────────┘
+                                                       │   artifact_fts        │
+                                                       └───────────────────────┘
     ```
   ],
   caption: [Two-agent topology with the ArtifactStore boundary. The subagent
