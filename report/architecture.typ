@@ -67,8 +67,10 @@ returns a report with formal citations the supervisor can verify.
 Implementation: ~2.0 kLOC of Python on SQLite + FTS5, plus a ~150 LOC
 client-side tool-use loop. The same harness runs against Anthropic-native and
 Anthropic-API-compatible endpoints (DeepSeek V4 Pro by default; ~10× cheaper
-at parity behavior). 123 tests pass — unit, integration, offline e2e, CLI
-integration, and adversarial stress. Live evaluation: 84 runs across two
+at parity behavior). 140 tests pass — unit, integration, offline e2e, CLI
+integration, adversarial stress, and review-driven regression tests for
+self-review-discovered weaknesses (long-line truncation, sensitivity
+self-labeling bypass, fence-post budget enforcement, citation case-handling). Live evaluation: 84 runs across two
 sweeps — §11.1 single-agent (4 fixtures × 4 baselines × 3 reps) shows
 ArtifactStore (B4) is the only baseline with 100% task success and EER=1.00
 on every fixture; §11.2 supervisor↔subagent (4 fixtures × 3 strategies × 3
@@ -695,7 +697,7 @@ spending eval budget.
 
 = Testing and Reproducibility
 
-123 tests pass against the prototype. Coverage:
+140 tests pass against the prototype. Coverage:
 
 - *Unit*: schema migration idempotency, ID format, predicate matching for
   every axis, sensitivity ordering, span-prefix path opacity, citation
@@ -726,6 +728,13 @@ spending eval budget.
   `init/put/grant/search/verify/find-related/show/expand`. Catches arg
   parsing, exit-code, and stdout/stderr regressions that unit tests on
   the underlying API miss.
+- *Review-driven regressions* (`tests/test_review_fixes.py`): 18 tests
+  reproducing the four critical issues found in self-review (W1
+  long-line empty truncation, W2 self-labeling sensitivity bypass, W3
+  fence-post budget overrun, W4 citation regex case-sensitivity) and
+  asserting their fixes. Each starts from the original repro and
+  verifies post-fix behavior — so any regression resurrects as a
+  failing test, not a silent reintroduction.
 
 The eval driver writes deterministic on-disk output: `config.json`,
 `result.jsonl`, `audit.csv`, `manifest.json` per sweep. `git_rev` and
@@ -775,13 +784,28 @@ shows up.
 == Permission enforcement
 
 #list(spacing: 5pt,
-  [*Cumulative grant budget.* `artifact_grants.consumed_tokens` ticks up
-    on every successful read via `account_consumption()`. When
-    `consumed_tokens >= max_tokens`, all further reads under the grant
-    are denied with `denial_reason="grant budget exhausted (X/Y)"`.
-    Per-grant counters are independent — exhausting one grant doesn't
-    affect another. `max_tokens=NULL` means unlimited (the seeded
-    `__supervisor__` grant uses this).],
+  [*Cumulative grant budget with pre-emptive clamp.* Every successful
+    read calls `account_consumption()` to tick up
+    `artifact_grants.consumed_tokens`. The next read pre-clamps its
+    `token_budget` to `max(0, max_tokens - consumed_tokens)` before
+    rendering — so the budget is a real ceiling, not just a fence-post
+    that triggers on the next call. Once `consumed >= max_tokens`,
+    `grants.check()` denies further reads with
+    `"grant budget exhausted (X/Y tokens)"`. `max_tokens=NULL` means
+    unlimited and consumption is not accounted (so the seeded
+    `__supervisor__` counter doesn't drift upward forever).],
+  [*Heuristic sensitivity inference at write time.* `put_artifact`
+    treats the caller's `sensitivity_label` as a *lower* bound. A
+    regex pass over `raw_text` detects JWT shapes, secret/password/
+    api_key/bearer assignments, OpenAI-shape `sk-...` keys, AWS
+    `AKIA...` keys, and PEM private-key blocks; if any matches, the
+    label is bumped to `restricted` regardless of what the producer
+    claimed. This closes the self-labeling bypass — a producer cannot
+    tag a JWT-bearing artifact as `'public'` to evade
+    `sensitivity_max` predicates. Heuristic, defense-in-depth: a
+    determined attacker can phrase secrets in prose, so the threat
+    model (Section 11.7) describes the residual trust boundary
+    explicitly.],
   [*Synthetic `__supervisor__` grant seeded by `migrate()`.* Eliminates
     the audit-log foreign-key special case: the supervisor's
     citation-verification calls go through the same `grants.check()`
@@ -802,8 +826,8 @@ shows up.
     on the next connect — no user-facing breakage.],
   [*Auto-derived-from links.* `put_artifact(parent_artifact_id=...)`
     automatically writes `(child, parent, 'derived_from', 1.0)` to
-    `artifact_links` via `INSERT OR IGNORE`. Without this, `find_related`
-    is dead code; with it, multi-step workload chains
+    `artifact_links` via `INSERT OR IGNORE`. Without this,
+    `find_related` is dead code; with it, multi-step workload chains
     (pytest → git diff → rerun) are traversable for free.],
 )
 
@@ -899,17 +923,64 @@ shows up.
     `usage.input_tokens` (which is the provider's authoritative number).
     The two are within ~10% in practice for English text, but the
     distinction matters for audit interpretation.],
-  [*Citation regex is case-sensitive lowercase.* `art_[0-9a-f]{8}/span_[0-9a-f]{8}`
-    matches our `secrets.token_hex(4)` output. Models occasionally
-    write uppercase hex; the regex misses those. We tighten the prompt
-    to require lowercase (the canonical form) instead of loosening the
-    regex — uppercase span_ids would conflict with the canonical schema.],
+  [*Citation regex accepts mixed case, normalizes on parse.*
+    `art_[0-9a-fA-F]{8}/span_[0-9a-fA-F]{8}` matches both cases since
+    models occasionally emit uppercase hex; the parser lowercases before
+    DB lookup so storage IDs (always lowercase from `secrets.token_hex`)
+    resolve regardless of model output convention.],
   [*Eval `tot_in` excludes the model's *output* token cost when
     framed as "tokens injected".* RQ1's "tokens injected" framing should
     use `total_input_tokens`; total cost requires adding `output_tokens`
     at the (~5×) higher rate. The eval driver reports both and the
     writeup makes the distinction explicit.],
 )
+
+== Threat model
+
+The access-control story is meaningful only when the trust boundaries
+are explicit. ArtifactStore makes three trust assumptions and one
+hardened-bypass-attempt defense:
+
+*Trusted (must be honest):*
+1. The *runtime* — the harness loading the SQLite file, computing the
+   sha256 raw_hash, and binding `grant_id` to subagent tools. If the
+   runtime lies (e.g. `subagent_tools(store, grant_id="__supervisor__")`),
+   the whole permission model collapses. We document grant-binding as
+   the harness's responsibility (CLAUDE.md "harness enforces scope, not
+   the LLM").
+2. The *issuer* of grants. `create_grant` writes whatever predicate the
+   caller specifies. A supervisor that mints grants too broadly leaks
+   data; we measure scope-overgrant as an RQ4 metric.
+3. The *grantee's tool surface*. Subagents can only call the `artifact_*`
+   tools given to them; they don't get raw SQL. Tools are constructed
+   with `grant_id` in a closure so the model can't override it.
+
+*Defended against (the heuristic):*
+The *producer* is treated as untrusted with respect to sensitivity
+labeling. A subagent or external tool that calls `put_artifact` with
+`sensitivity_label='public'` cannot bypass the `sensitivity_max`
+predicate ceiling: at write time, `effective_sensitivity` regex-scans
+`raw_text` for JWT/secret/api_key/AKIA/PEM-key shapes and bumps the
+label to `restricted` regardless of the claim. The original W2 attack
+("attacker labels their JWT-bearing output as `'public'`") is now
+blocked end-to-end. *But*: the heuristic has false negatives. Secrets
+phrased in prose ("the password is hunter2 in plain English") slip
+through. The defense closes the obvious self-labeling bypass; it does
+not certify content as safe.
+
+*Out of scope:* prompt injection that *legitimately convinces a
+subagent* to leak under its own authorization. Citations help here
+(`cite.verify_resolves` rejects fabricated span_ids — see §11.3 stress
+test 2), but if a subagent has a grant to read a secret artifact, the
+secret can leak via the diagnosis text. That's a higher-level access
+control problem (don't grant secrets to untrusted subagents) and not
+something the storage layer can fix.
+
+*Out of scope (operational):* SQLite file-level confidentiality. We
+rely on the host file system. Anyone with read access to the `.db`
+file bypasses the grant model entirely. Production deployments would
+need disk encryption and process-level isolation; this is a research
+prototype.
 
 = Related Work
 

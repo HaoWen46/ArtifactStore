@@ -24,7 +24,6 @@ def test_parse_well_formed():
 @pytest.mark.parametrize("bad", [
     "",
     "art_x/span_x",
-    "art_DEADBEEF/span_cafe1234",  # uppercase hex
     "artdeadbeef/spancafe1234",
     "art_deadbeef span_cafe1234",
     "art_deadbeef/span_cafe1234/extra",

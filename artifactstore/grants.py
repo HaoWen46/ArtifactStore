@@ -11,6 +11,7 @@ Empty / missing predicate keys = no constraint along that axis.
 """
 from __future__ import annotations
 import json
+import re
 import sqlite3
 from datetime import datetime, timezone
 
@@ -25,6 +26,69 @@ SENSITIVITY: dict[str, int] = {
     "secret": 3,
 }
 DEFAULT_SENSITIVITY = "internal"
+
+
+# Patterns that indicate sensitive content in raw text. If any matches, we
+# bump the sensitivity_label up to 'restricted' regardless of what the
+# producer said. Defense-in-depth against producers who self-label as
+# 'public' to bypass the predicate ceiling.
+#
+# These are heuristic — a determined attacker can phrase secrets in ways
+# the regex doesn't see ("the password is hunter2 in plain prose"). The
+# threat model documents this explicitly: callers from outside the harness
+# (subagents, external tools) cannot raise their own sensitivity ceiling
+# by mislabeling.
+_SECRET_PATTERNS = [
+    # JWT (three base64-ish segments separated by dots)
+    re.compile(r"eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+"),
+    # secret/password/api_key/bearer = value
+    re.compile(r"(?i)\b(secret|password|passwd|api[_-]?key|bearer|access[_-]?key)"
+               r"\s*[:=]\s*\S+"),
+    # OpenAI/Anthropic/etc shape keys
+    re.compile(r"sk-[A-Za-z0-9]{20,}"),
+    # AWS access key id
+    re.compile(r"\bAKIA[A-Z0-9]{16}\b"),
+    # Private key blocks
+    re.compile(r"-----BEGIN[A-Z ]+PRIVATE KEY-----"),
+]
+
+
+def infer_sensitivity(raw_text: str) -> str:
+    """Heuristic: returns the MINIMUM safe sensitivity label for the given
+    raw text. 'restricted' if any secret-pattern matches, else 'public'
+    (no positive signal — caller's claim wins). False negatives possible
+    (a determined attacker can phrase secrets in prose); this is
+    defense-in-depth, not a hard guarantee.
+    """
+    for pat in _SECRET_PATTERNS:
+        if pat.search(raw_text):
+            return "restricted"
+    return "public"
+
+
+def effective_sensitivity(claimed_label: str, raw_text: str) -> str:
+    """The sensitivity label actually stored.
+
+    Semantics: `final = max(claimed, inferred)` by SENSITIVITY ordering.
+
+    - If the producer claims a high label (e.g. 'secret'), the claim is
+      honored — claimed acts as a lower bound.
+    - If the producer claims a low label (e.g. 'public') but the
+      heuristic finds secrets, the inferred label wins. The producer
+      cannot self-label sensitive content down to bypass
+      `sensitivity_max` predicates.
+    - Clean content + claim of 'public' ⇒ 'public' (claim honored).
+
+    This is enforcement at the storage boundary, not at the read boundary
+    (predicate enforcement still applies as before). One regex pass per
+    put_artifact.
+    """
+    inferred = infer_sensitivity(raw_text)
+    claimed_score = SENSITIVITY.get(claimed_label, SENSITIVITY[DEFAULT_SENSITIVITY])
+    inferred_score = SENSITIVITY.get(inferred, SENSITIVITY[DEFAULT_SENSITIVITY])
+    if inferred_score > claimed_score:
+        return inferred
+    return claimed_label
 
 
 class AccessDenied(Exception):
@@ -141,14 +205,17 @@ def check(conn: sqlite3.Connection, grant_id: str, artifact_id: str | None,
 def account_consumption(conn: sqlite3.Connection, grant_id: str,
                         tokens: int) -> None:
     """Increment a grant's consumed_tokens after a successful read. Called by
-    the store API alongside log_access. No-op for grants with NULL max_tokens
-    (unlimited) — we still track for observability but it can't trip a denial.
+    the store API alongside log_access. Skipped for grants with NULL
+    max_tokens (unlimited) — there's no quota to debit, and otherwise the
+    seeded __supervisor__ grant's counter would drift upward forever.
     """
     if tokens <= 0:
         return
+    # Only debit grants with a finite max_tokens.
     conn.execute(
         "UPDATE artifact_grants SET consumed_tokens = "
-        "COALESCE(consumed_tokens, 0) + ? WHERE grant_id = ?",
+        "COALESCE(consumed_tokens, 0) + ? "
+        "WHERE grant_id = ? AND max_tokens IS NOT NULL",
         (tokens, grant_id),
     )
 

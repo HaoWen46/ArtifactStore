@@ -24,7 +24,10 @@ from typing import Any
 
 from artifactstore.cite import CITATION_RE, verify_resolves
 
-CITATION_INLINE = re.compile(r"art_[0-9a-f]{8}/span_[0-9a-f]{8}")
+# Case-insensitive — match the canonical regex in artifactstore.cite,
+# which accepts uppercase models occasionally emit. We normalize to
+# lowercase before passing to verify_resolves (storage IDs are lowercase).
+CITATION_INLINE = re.compile(r"art_[0-9a-fA-F]{8}/span_[0-9a-fA-F]{8}")
 
 
 def evidence_recall(diagnosis: str, gold: dict) -> float:
@@ -48,8 +51,9 @@ def task_success(diagnosis: str, gold: dict, *, threshold: float = 0.5) -> bool:
 
 def extract_citations(diagnosis: str) -> list[str]:
     """Pull citation strings from the diagnosis text. Tolerates the citation
-    being inline (like '... see art_xxx/span_yyy ...')."""
-    return [m for m in CITATION_INLINE.findall(diagnosis)]
+    being inline (like '... see art_xxx/span_yyy ...'). Normalizes to
+    lowercase since storage IDs are always lowercase."""
+    return [m.lower() for m in CITATION_INLINE.findall(diagnosis)]
 
 
 def citation_validity(citations: list[str], conn: sqlite3.Connection) -> tuple[int, float]:

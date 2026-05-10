@@ -33,18 +33,27 @@ def register(artifact_type: str):
 
 
 def _truncate_lines_to_budget(text: str, budget: int) -> str:
-    """Omit-fits over lines: include whole-or-skip until next line would overflow."""
-    if budget <= 0:
+    """Omit-fits over lines. If the first line alone overflows (single-line
+    content), fall back to char-level truncation with a marker so the
+    preview body is never silently empty. See views._truncate_lines for
+    the same semantics on the read path."""
+    if budget <= 0 or not text:
         return ""
     out: list[str] = []
     used = 0
     for line in text.splitlines():
-        cost = estimate(line) + 1  # +1 for the newline
+        cost = estimate(line) + 1
         if used + cost > budget:
             break
         out.append(line)
         used += cost
-    return "\n".join(out)
+    if out:
+        return "\n".join(out)
+    marker = f"\n... [truncated, {len(text)} chars total]"
+    chars_for_content = max(0, budget * 4 - len(marker))
+    if chars_for_content <= 0:
+        return ""
+    return text[:chars_for_content] + marker
 
 
 def _spans_inline(spans: list[Any], budget: int) -> str:

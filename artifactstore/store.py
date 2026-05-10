@@ -23,10 +23,29 @@ from artifactstore.grants import (
     DEFAULT_SENSITIVITY,
     account_consumption,
     check,
+    effective_sensitivity,
     load_grant,
     log_access,
     predicate_matches,
 )
+
+
+def _remaining_budget(grant: dict, requested: int) -> int:
+    """Cap the per-call token_budget at whatever's left in the grant's
+    cumulative max_tokens. Without this, a single read call could pull
+    arbitrarily more than `max_tokens - consumed` and only get blocked
+    on the NEXT call (fence-post). Clamping pre-emptively means the
+    grant cap is a real ceiling, not just an upper bound on call count.
+
+    grants with max_tokens=NULL (unlimited; the seeded __supervisor__
+    grant) are unaffected — we return the requested budget as-is.
+    """
+    max_t = grant.get("max_tokens")
+    if max_t is None:
+        return requested
+    consumed = grant.get("consumed_tokens") or 0
+    remaining = max(0, max_t - consumed)
+    return min(requested, remaining)
 from artifactstore.previews import make_preview
 from artifactstore.tokens import estimate
 
@@ -67,6 +86,13 @@ class ArtifactStore:
         preview_text = make_preview(artifact_type, raw_text, raw_tokens,
                                     spans=spans)
 
+        # The caller's sensitivity_label is a LOWER bound. The heuristic in
+        # grants.effective_sensitivity bumps it up if the content matches a
+        # secret pattern (JWT, password=, sk-..., AKIA..., PEM key block).
+        # Closes the self-labeling bypass — a producer can't tag a
+        # JWT-bearing artifact as 'public' to evade sensitivity_max predicates.
+        final_label = effective_sensitivity(sensitivity_label, raw_text)
+
         self.conn.execute(
             """INSERT INTO artifacts(
                  artifact_id, session_id, parent_artifact_id, creator_agent_id,
@@ -75,7 +101,7 @@ class ArtifactStore:
                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (aid, session_id, parent_artifact_id, creator_agent_id,
              tool_name, artifact_type, raw_text, raw_hash, raw_tokens,
-             preview_text, sensitivity_label, json.dumps(metadata or {})),
+             preview_text, final_label, json.dumps(metadata or {})),
         )
 
         span_texts: list[str] = []
@@ -122,6 +148,7 @@ class ArtifactStore:
         token_budget: int = 1000,
     ) -> list[dict]:
         grant = check(self.conn, grant_id, None, "search", None)
+        token_budget = _remaining_budget(grant, token_budget)
         # FTS5 syntax is permissive enough for plain queries; bm25 ranks better.
         try:
             rows = self.conn.execute(
@@ -182,6 +209,7 @@ class ArtifactStore:
         token_budget: int = 1000,
     ) -> list[dict]:
         grant = check(self.conn, grant_id, artifact_id, "get_spans", None)
+        token_budget = _remaining_budget(grant, token_budget)
         q = (
             "SELECT span_id, span_type, file_path, line_start, line_end, "
             "       text, token_count, importance "
@@ -233,6 +261,7 @@ class ArtifactStore:
         if view not in views.VIEW_NAMES:
             raise ValueError(f"unknown view: {view}")
         grant = check(self.conn, grant_id, artifact_id, "expand_view", view)
+        token_budget = _remaining_budget(grant, token_budget)
         rendered = views.VIEWS[view](
             self.conn, artifact_id, token_budget,
             predicate=grant["artifact_predicate"],

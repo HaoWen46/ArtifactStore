@@ -10,7 +10,11 @@ from __future__ import annotations
 import re
 import sqlite3
 
-CITATION_RE = re.compile(r"^art_[0-9a-f]{8}/span_[0-9a-f]{8}$")
+# Accept hex in either case so we don't silently drop citations from models
+# that emit uppercase. Storage IDs are always lowercase (from
+# secrets.token_hex), so we normalize on parse — DB lookups go through
+# lowercase regardless of caller input.
+CITATION_RE = re.compile(r"^art_[0-9a-fA-F]{8}/span_[0-9a-fA-F]{8}$")
 
 
 class BadCitation(ValueError):
@@ -18,11 +22,12 @@ class BadCitation(ValueError):
 
 
 def parse(citation: str) -> tuple[str, str]:
-    """('art_xxxxxxxx', 'span_yyyyyyyy') or BadCitation."""
+    """('art_xxxxxxxx', 'span_yyyyyyyy') or BadCitation. Returned ids are
+    always lowercase regardless of input case."""
     s = citation.strip()
     if not CITATION_RE.match(s):
         raise BadCitation(f"malformed citation: {citation!r}")
-    art, span = s.split("/", 1)
+    art, span = s.lower().split("/", 1)
     return art, span
 
 

@@ -24,7 +24,13 @@ class ArtifactNotFound(KeyError):
 
 
 def _truncate_lines(text: str, budget: int) -> str:
-    if budget <= 0:
+    """Take whole lines until budget would overflow. If the first line
+    alone overflows (single-line content like a minified file or a JSON
+    dump), fall back to character-level truncation with a '... [N chars
+    truncated]' marker — otherwise the caller would get an empty string
+    for any content with no useful line breaks under tight budgets.
+    """
+    if budget <= 0 or not text:
         return ""
     out: list[str] = []
     used = 0
@@ -34,7 +40,16 @@ def _truncate_lines(text: str, budget: int) -> str:
             break
         out.append(line)
         used += cost
-    return "\n".join(out)
+    if out:
+        return "\n".join(out)
+    # Nothing fit at line granularity. Char-level fallback so we never
+    # silently return empty when content exists. ~4 chars/token; leave
+    # room for the truncation marker.
+    marker = f"\n... [truncated, {len(text)} chars total]"
+    chars_for_content = max(0, budget * 4 - len(marker))
+    if chars_for_content <= 0:
+        return ""
+    return text[:chars_for_content] + marker
 
 
 def _load_artifact(conn: sqlite3.Connection, artifact_id: str) -> sqlite3.Row:

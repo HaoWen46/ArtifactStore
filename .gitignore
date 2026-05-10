@@ -36,3 +36,4 @@ notes/references/*/
 .env
 .env.*
 !.env.example
+.coverage

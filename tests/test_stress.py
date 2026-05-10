@@ -203,15 +203,24 @@ def test_find_related_filters_out_of_scope_targets(tmp_path: Path):
 def test_grant_budget_exhaustion_under_attack(tmp_path: Path):
     """Adversarial pattern: subagent loops expand_view until the grant's
     cumulative max_tokens is exhausted. After exhaustion all subsequent
-    reads are denied — even of artifacts the predicate would allow."""
+    reads are denied — even of artifacts the predicate would allow.
+
+    Post-W3 fix: each read is clamped to remaining budget, so exhaustion
+    may take multiple reads instead of being achievable in one over-run.
+    The eventual denial behavior is what matters for RQ4."""
     store = _store(tmp_path)
     aid = _put(store, text=("boom\n" * 200), atype="pytest_failure")
-    gid = _grant(store, max_tokens=50)  # tiny budget
-    # First read drains the budget.
-    store.expand_view(aid, grant_id=gid, view="preview", token_budget=500)
-    # Subsequent read denied.
-    with pytest.raises(AccessDenied, match="budget exhausted"):
-        store.expand_view(aid, grant_id=gid, view="preview", token_budget=500)
+    gid = _grant(store, max_tokens=20)  # tiny budget
+    denied = False
+    for _ in range(8):
+        try:
+            store.expand_view(aid, grant_id=gid, view="preview",
+                                token_budget=500)
+        except AccessDenied as e:
+            assert "budget exhausted" in str(e)
+            denied = True
+            break
+    assert denied, "budget never exhausted"
     rows = store.audit(gid)
     assert sum(1 for r in rows if r["allowed"] in (0, False)) >= 1
 
