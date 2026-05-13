@@ -166,12 +166,12 @@ def b3_llm_summary(store: ArtifactStore, fixture_data: str,
                    *, summarizer_model: str = "deepseek-v4-pro") -> Setup:
     """B3' — LLM-generated summary rather than regex.
 
-    Calls the same Anthropic-Messages-API endpoint as the agent loop (so
-    ANTHROPIC_BASE_URL routes it through DeepSeek by default; no extra
-    plumbing). One-shot summarization, no tools. Token cost is accounted
-    on Setup.setup_* fields and folded into the run's reported total by
-    the driver — keeps cost numbers apples-to-apples against B3
-    (deterministic, $0 setup).
+    Calls the same provider as the agent loop (resolved from
+    `summarizer_model`'s prefix via demo.providers). One-shot
+    summarization, no tools. Token cost is accounted on Setup.setup_*
+    fields and folded into the run's reported total by the driver —
+    keeps cost numbers apples-to-apples against B3 (deterministic,
+    $0 setup).
     """
     summarizer = Agent(
         name="b3_llm_summarizer",

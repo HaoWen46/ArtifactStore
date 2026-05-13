@@ -1,8 +1,9 @@
 """Agent constructor safety + provider configuration.
 
-The agent uses the `anthropic` SDK as its HTTP client; via `ANTHROPIC_BASE_URL`
-the same SDK speaks DeepSeek's Anthropic-compatible endpoint. None of these
-tests touch the network — they verify the wiring picks up the right env vars
+The agent uses the `anthropic` SDK as a transport against any
+Anthropic-Messages-API-compatible endpoint. Supported providers:
+DeepSeek and Qwen (via Alibaba Model Studio). None of these tests
+touch the network — they verify the wiring picks up the right env vars
 and that an injected client fully bypasses provider detection.
 """
 from __future__ import annotations
@@ -17,16 +18,30 @@ from demo.agent import (
 )
 
 
-def test_agent_requires_api_key_when_no_client_injected(monkeypatch):
-    # Clear every provider env var so the resolver has nothing to fall back to.
-    for var in ("ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "QWEN_API_KEY"):
+PROVIDER_ENV_VARS = (
+    "DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL",
+    "QWEN_API_KEY", "QWEN_BASE_URL",
+    # Cleared too in case something in the parent shell exports a stale
+    # Anthropic env — must NOT influence the resolver.
+    "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL",
+)
+
+
+def _clear_env(monkeypatch):
+    """Drop every provider env var so the resolver only sees what the
+    test sets explicitly."""
+    for var in PROVIDER_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
+
+
+def test_agent_requires_api_key_when_no_client_injected(monkeypatch):
+    _clear_env(monkeypatch)
     with pytest.raises(RuntimeError, match=r"DEEPSEEK_API_KEY|API key"):
         Agent(name="x", system="", tools=[])
 
 
 def test_agent_accepts_injected_client(monkeypatch):
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _clear_env(monkeypatch)
     sentinel = object()
     a = Agent(name="x", system="", tools=[], client=sentinel,
               config=ModelConfig())
@@ -44,17 +59,6 @@ def test_deepseek_base_url_constant():
     assert DEEPSEEK_BASE_URL == "https://api.deepseek.com/anthropic"
 
 
-def _clear_env(monkeypatch):
-    """Drop every provider env var so the resolver only sees what the
-    test sets explicitly. Tests that exercise the resolver must call
-    this first; otherwise an outer shell can leak credentials into the
-    test process and silently change the expected base_url."""
-    for var in ("ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL",
-                "DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL",
-                "QWEN_API_KEY", "QWEN_BASE_URL"):
-        monkeypatch.delenv(var, raising=False)
-
-
 def test_deepseek_base_url_env_overrides_default(monkeypatch):
     """DEEPSEEK_BASE_URL overrides the provider's hard-coded default —
     required for self-hosted DeepSeek shims or regional endpoints."""
@@ -66,18 +70,32 @@ def test_deepseek_base_url_env_overrides_default(monkeypatch):
     assert "my-deepseek-proxy.example" in str(a.client.base_url)
 
 
-def test_anthropic_base_url_does_not_leak_across_providers(monkeypatch):
-    """Critical: ANTHROPIC_BASE_URL is the env var for the *anthropic*
-    provider only — it must not silently apply to deepseek-* or qwen-*
-    models. Without this guarantee, a legacy .env with
-    ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic would route
-    a Qwen sweep to DeepSeek and the user would have no way to know."""
+def test_anthropic_env_does_not_leak_into_deepseek(monkeypatch):
+    """A legacy ANTHROPIC_BASE_URL or ANTHROPIC_API_KEY in the shell rc
+    must NOT silently apply to deepseek-* models. Each provider reads
+    only its own env vars."""
     _clear_env(monkeypatch)
-    monkeypatch.setenv("QWEN_API_KEY", "test-key-not-used")
-    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.deepseek.com/anthropic")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "real-deepseek-key")
+    monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/anthropic")
+    # Decoy: must be ignored.
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://decoy.example/")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "should-not-be-used")
     a = Agent(name="x", system="", tools=[],
-              config=ModelConfig(model="qwen3.6-max"))
-    # Qwen model -> Qwen URL, regardless of ANTHROPIC_BASE_URL.
+              config=ModelConfig(model="deepseek-v4-pro"))
+    assert "deepseek.com" in str(a.client.base_url)
+    assert "decoy.example" not in str(a.client.base_url)
+
+
+def test_anthropic_env_does_not_leak_into_qwen(monkeypatch):
+    """Critical: ANTHROPIC_BASE_URL / ANTHROPIC_API_KEY in the shell
+    rc must NOT silently route a Qwen request to Anthropic / DeepSeek.
+    The user would have no way to know."""
+    _clear_env(monkeypatch)
+    monkeypatch.setenv("QWEN_API_KEY", "real-qwen-key")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.deepseek.com/anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "should-not-be-used")
+    a = Agent(name="x", system="", tools=[],
+              config=ModelConfig(model="qwen3.6-plus"))
     assert "dashscope" in str(a.client.base_url)
     assert "deepseek.com" not in str(a.client.base_url)
 
@@ -85,8 +103,6 @@ def test_anthropic_base_url_does_not_leak_across_providers(monkeypatch):
 def test_modelconfig_base_url_overrides_env(monkeypatch):
     """An explicit ModelConfig(base_url=...) wins over every env var."""
     _clear_env(monkeypatch)
-    # Default model is deepseek-v4-pro, so set the DeepSeek key (not
-    # ANTHROPIC_API_KEY — there is no cross-provider fallback).
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key-not-used")
     monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://elsewhere.example/")
     a = Agent(name="x", system="", tools=[],
@@ -96,9 +112,8 @@ def test_modelconfig_base_url_overrides_env(monkeypatch):
 
 
 def test_deepseek_model_picks_deepseek_url_with_no_env_override(monkeypatch):
-    """New behaviour: with the default deepseek-* model and no env-var
-    overrides, the resolver supplies DeepSeek's URL automatically.
-    Replaces the prior "no base_url → SDK default" semantics."""
+    """Default deepseek-* model with no env-var override resolves to
+    DeepSeek's URL automatically."""
     _clear_env(monkeypatch)
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key-not-used")
     a = Agent(name="x", system="", tools=[],
@@ -107,13 +122,14 @@ def test_deepseek_model_picks_deepseek_url_with_no_env_override(monkeypatch):
 
 
 def test_qwen_model_picks_qwen_url(monkeypatch):
-    """Qwen model prefix routes to the DashScope endpoint by default."""
+    """Qwen model prefix routes to the DashScope intl endpoint by
+    default."""
     _clear_env(monkeypatch)
     monkeypatch.setenv("QWEN_API_KEY", "test-key-not-used")
     a = Agent(name="x", system="", tools=[],
-              config=ModelConfig(model="qwen3.6-max"))
-    # Default International tenant; override via QWEN_BASE_URL covered below.
-    assert "dashscope" in str(a.client.base_url)
+              config=ModelConfig(model="qwen3.6-plus"))
+    assert "dashscope-intl.aliyuncs.com" in str(a.client.base_url)
+    assert "/apps/anthropic" in str(a.client.base_url)
 
 
 def test_qwen_base_url_env_overrides_default(monkeypatch):
@@ -121,36 +137,35 @@ def test_qwen_base_url_env_overrides_default(monkeypatch):
     mainland-CN tenants and self-hosted shims can point elsewhere."""
     _clear_env(monkeypatch)
     monkeypatch.setenv("QWEN_API_KEY", "test-key-not-used")
-    monkeypatch.setenv("QWEN_BASE_URL", "https://my-qwen-proxy.example/anthropic")
+    monkeypatch.setenv("QWEN_BASE_URL",
+                       "https://dashscope.aliyuncs.com/apps/anthropic")
     a = Agent(name="x", system="", tools=[],
-              config=ModelConfig(model="qwen3.6-max"))
-    assert "my-qwen-proxy.example" in str(a.client.base_url)
-    assert "dashscope" not in str(a.client.base_url)
+              config=ModelConfig(model="qwen3.6-plus"))
+    assert "dashscope.aliyuncs.com/apps/anthropic" in str(a.client.base_url)
+    assert "dashscope-intl" not in str(a.client.base_url)
 
 
-def test_claude_model_falls_back_to_sdk_default(monkeypatch):
-    """Anthropic-native models with no base_url use the SDK's built-in
-    api.anthropic.com — sanity check we didn't accidentally hardwire
-    DeepSeek or Qwen as the catch-all default."""
+def test_unknown_model_prefix_rejected(monkeypatch):
+    """Models that don't start with deepseek- or qwen are rejected
+    up-front — no silent fallback to a default provider that would
+    misroute credentials."""
     _clear_env(monkeypatch)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-not-used")
-    a = Agent(name="x", system="", tools=[],
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key-not-used")
+    monkeypatch.setenv("QWEN_API_KEY", "test-key-not-used")
+    with pytest.raises(RuntimeError, match="No provider matches"):
+        Agent(name="x", system="", tools=[],
               config=ModelConfig(model="claude-sonnet-4-5"))
-    assert "anthropic.com" in str(a.client.base_url)
-    assert "deepseek.com" not in str(a.client.base_url)
-    assert "dashscope" not in str(a.client.base_url)
+    with pytest.raises(RuntimeError, match="No provider matches"):
+        Agent(name="x", system="", tools=[],
+              config=ModelConfig(model="gpt-4o"))
 
 
-def test_anthropic_key_does_not_authenticate_other_providers(monkeypatch):
-    """Critical: a bare ANTHROPIC_API_KEY must not silently authenticate
-    a DeepSeek or Qwen request. The fallback is gone for the same
-    reason ANTHROPIC_BASE_URL does not leak across providers — silent
-    credential misrouting is worse than an up-front error. Legacy
-    single-env-var users must rename ANTHROPIC_API_KEY -> DEEPSEEK_API_KEY
-    in their .env (documented in .env.example)."""
+def test_deepseek_key_missing_for_deepseek_model(monkeypatch):
+    """Without DEEPSEEK_API_KEY the resolver must raise — must NOT
+    silently use a QWEN_API_KEY or ANTHROPIC_API_KEY from the shell."""
     _clear_env(monkeypatch)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-not-used")
-    # No DEEPSEEK_API_KEY — must raise, not silently use ANTHROPIC_API_KEY.
+    monkeypatch.setenv("QWEN_API_KEY", "leaked-qwen-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "leaked-anthropic-key")
     with pytest.raises(RuntimeError, match="DEEPSEEK_API_KEY"):
         Agent(name="x", system="", tools=[],
               config=ModelConfig(model="deepseek-v4-pro"))
@@ -163,7 +178,39 @@ def test_qwen_key_required_for_qwen_models(monkeypatch):
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key-not-used")
     with pytest.raises(RuntimeError, match="QWEN_API_KEY"):
         Agent(name="x", system="", tools=[],
-              config=ModelConfig(model="qwen3.6-max"))
+              config=ModelConfig(model="qwen3.6-plus"))
+
+
+def test_resolver_uses_correct_key_per_provider(monkeypatch):
+    """Both keys set simultaneously: deepseek-* model must pick up
+    DEEPSEEK_API_KEY, qwen* model must pick up QWEN_API_KEY — never
+    the other way around. The one .env / two providers contract."""
+    from demo.providers import resolve
+    _clear_env(monkeypatch)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "DK-deepseek")
+    monkeypatch.setenv("QWEN_API_KEY", "QK-qwen")
+
+    key_ds, url_ds, prov_ds = resolve("deepseek-v4-pro")
+    assert key_ds == "DK-deepseek"
+    assert "deepseek.com" in url_ds
+    assert prov_ds.name == "DeepSeek"
+
+    key_q, url_q, prov_q = resolve("qwen3.6-plus")
+    assert key_q == "QK-qwen"
+    assert "dashscope-intl.aliyuncs.com" in url_q
+    assert "Qwen" in prov_q.name
+
+
+def test_describe_reports_unknown_provider(monkeypatch):
+    """describe() must NOT raise on an unknown model — it must return
+    a structured 'UNKNOWN' so the runner can print a clean error
+    instead of stack-tracing past it."""
+    from demo.providers import describe
+    _clear_env(monkeypatch)
+    d = describe("claude-sonnet-4-5")
+    assert d["provider"] == "UNKNOWN"
+    assert d["key_present"] is False
+    assert "error" in d
 
 
 # ---------------------------------------------------------------------------

@@ -50,7 +50,7 @@ These nail down the open questions in PLAN §7–§9 and §20. Do not relitigate
 - **FTS5 lifecycle**: one row inserted per `put_artifact` (`span_text = "\n".join(spans)`); artifacts are **immutable**, no update path in v1.
 - **Synthetic `__supervisor__` grant** is seeded by `migrate()` (idempotent INSERT in `schema.sql`). Allows audit-log FKs to resolve and keeps `expand_artifact` from special-casing in app code.
 - **Subagent termination**: `force_terminator="submit_report"` after 8 turns (already in `demo/agent.py`). Endorsed by PLAN §20.3.
-- **API key safety**: `Agent.__init__` fails loudly if `ANTHROPIC_API_KEY` is missing **and** no client is injected. Tests inject a stub client.
+- **API key safety**: `Agent.__init__` fails loudly if the provider key for the resolved model (`DEEPSEEK_API_KEY` for `deepseek-*`, `QWEN_API_KEY` for `qwen*`) is missing **and** no client is injected. No cross-provider fallback. Tests inject a stub client.
 - **Gold-truth fixtures**: each `eval/fixtures/<name>.<ext>` ships with a sibling `<name>.gold.json` listing the expected evidence — that's how RQ2 evidence-recall stops being a vibe.
 - **`eval/runs/<UTC-iso>/`** layout: `config.json` (baseline + model + fixture), `result.jsonl` (one row per task), `audit.csv` (dump of `artifact_access_log`), `manifest.json` (git rev + timing). Driver writes; nothing else touches.
 
@@ -92,21 +92,22 @@ Skill/tool selection, general agent memory, KV-cache, A2A protocol, multi-agent 
 
 ### Provider configuration
 
-The agent loop uses the `anthropic` Python SDK as its HTTP client, but **the project does not require Anthropic as a provider**. The SDK works against any Anthropic-API-compatible endpoint via `ANTHROPIC_BASE_URL`.
+The agent loop uses the `anthropic` Python SDK as a transport against any Anthropic-Messages-API-compatible endpoint. Two providers are supported simultaneously; the model-name prefix picks credentials.
 
-Default provider: **DeepSeek V4** (much cheaper, same Messages API shape). DeepSeek docs: <https://api-docs.deepseek.com/guides/anthropic_api>.
+| Prefix | Provider | Key env | URL env | Default URL |
+| --- | --- | --- | --- | --- |
+| `deepseek-*` | DeepSeek V4 ([docs](https://api-docs.deepseek.com/guides/anthropic_api)) | `DEEPSEEK_API_KEY` | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com/anthropic` |
+| `qwen*` | Alibaba Model Studio ([docs](https://www.alibabacloud.com/help/en/model-studio/anthropic-api-messages)) | `QWEN_API_KEY` | `QWEN_BASE_URL` | `https://dashscope-intl.aliyuncs.com/apps/anthropic` |
+
+Each provider reads only its own env vars — no cross-provider fallback. Copy `.env.example` to `.env`, fill in whichever keys you have. Both can coexist; the runner picks credentials from `--model`.
 
 ```bash
-# DeepSeek (default, recommended)
-export ANTHROPIC_API_KEY="<your DeepSeek key from platform.deepseek.com>"
-export ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic"
-
-# Native Anthropic (alternate)
-export ANTHROPIC_API_KEY="<your Anthropic key>"
-unset ANTHROPIC_BASE_URL
+# Sample sweep across providers (one .env, two API keys filled in):
+uv run python -m eval.driver --model deepseek-v4-pro --reps 5
+uv run python -m eval.driver --model qwen3.6-plus    --reps 5
 ```
 
-`demo.agent.DEFAULT_MODEL = "deepseek-v4-pro"`. For cheaper iteration, override with `--model deepseek-v4-flash`. For native Anthropic runs, override with `--model claude-sonnet-4-5` (or whatever).
+`demo.agent.DEFAULT_MODEL = "deepseek-v4-pro"`. Cheaper iteration: `--model deepseek-v4-flash` or `--model qwen-flash`. Headline-model recommendation for Qwen: `qwen3.6-plus`.
 
 Tests don't touch this — they inject a `ScriptedClient` stub directly. No keys, no network.
 

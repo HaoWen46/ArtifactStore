@@ -2,18 +2,18 @@
 
 Adapted from anthropic-quickstarts/agents (MIT). Stripped down: no MCP,
 no async-everywhere. Tools are sync callables; we wrap them in to_thread
-only if a tool ever needs it. The loop is the canonical one from
-platform.claude.com/docs/.../how-tool-use-works.
+only if a tool ever needs it.
 
-The client is the `anthropic` Python SDK. The same SDK speaks Anthropic's
-Messages API natively *and* DeepSeek's Anthropic-compatible endpoint at
-`https://api.deepseek.com/anthropic`, so swapping providers is two env vars,
-not a code change. See CLAUDE.md "Demo agent / Provider configuration".
+The client is the `anthropic` Python SDK used purely as an HTTP client
+against an Anthropic-Messages-API-compatible endpoint. The default
+endpoint is DeepSeek; Qwen (Alibaba Model Studio) is also supported.
+The model name prefix picks the provider — see `demo/providers.py`.
 
 Env vars consumed (when no client is injected):
-    ANTHROPIC_API_KEY     required; the provider's API key
-    ANTHROPIC_BASE_URL    optional; e.g. https://api.deepseek.com/anthropic
-                          for DeepSeek. Unset = native Anthropic.
+    deepseek-* models -> DEEPSEEK_API_KEY [+ DEEPSEEK_BASE_URL]
+    qwen* models      -> QWEN_API_KEY     [+ QWEN_BASE_URL]
+No cross-provider fallback. Missing key for the resolved provider
+raises a pointed RuntimeError up-front.
 """
 from __future__ import annotations
 
@@ -59,9 +59,9 @@ class ModelConfig:
     # on a strong prompt + this cap as the backstop.
     max_turns: int = 10
     temperature: float = 1.0
-    # Provider override. None => use ANTHROPIC_BASE_URL env var, else SDK
-    # default (Anthropic). To target DeepSeek explicitly from code, pass
-    # base_url=DEEPSEEK_BASE_URL.
+    # Explicit base_url override. None => resolved from the model name
+    # via demo.providers (DEEPSEEK_BASE_URL / QWEN_BASE_URL env vars or
+    # the provider's hard-coded default).
     base_url: str | None = None
 
 
@@ -73,7 +73,7 @@ class AgentResult:
     tool_calls: int
     # Token accounting. `input_tokens` is the SDK's "uncached" count (what's
     # billed at full rate); cache_read/cache_creation are populated when the
-    # provider supports prompt caching (Anthropic native, DeepSeek). For
+    # provider supports prompt caching (DeepSeek; Qwen may not). For
     # RQ1 efficiency comparisons across baselines, use `total_input_tokens`
     # — the actual tokens the model saw — not just `input_tokens`, which
     # gets warped by cache hits when reps share prompts.
@@ -106,8 +106,8 @@ class Agent:
         self.config = config or ModelConfig()
         if client is None:
             # Resolve provider from the model name so a sweep can run
-            # `--model deepseek-v4-pro` and `--model qwen3.6-max` back to
-            # back without editing .env between runs. Caller-supplied
+            # `--model deepseek-v4-pro` and `--model qwen3.6-plus` back
+            # to back without editing .env between runs. Caller-supplied
             # base_url still wins over the provider default.
             from demo.providers import resolve, ProviderError
             try:
@@ -118,8 +118,7 @@ class Agent:
                     "relying on env vars."
                 ) from exc
             base_url = self.config.base_url or default_base_url
-            client = (Anthropic(api_key=api_key, base_url=base_url)
-                      if base_url else Anthropic(api_key=api_key))
+            client = Anthropic(api_key=api_key, base_url=base_url)
         self.client = client
         self.verbose = verbose
         self.force_terminator = force_terminator
@@ -198,10 +197,10 @@ class Agent:
                     raise
             in_tok += resp.usage.input_tokens
             out_tok += resp.usage.output_tokens
-            # Anthropic + DeepSeek both expose these on usage when prompt
-            # caching is in play. They may be missing or None on other
-            # providers (or on the first call) — getattr-with-default keeps
-            # us robust.
+            # DeepSeek (and Anthropic-native, if ever used) expose these
+            # on usage when prompt caching is in play. They may be missing
+            # or None on other providers (Qwen) — getattr-with-default
+            # keeps us robust.
             cache_read += getattr(resp.usage, "cache_read_input_tokens", 0) or 0
             cache_create += getattr(
                 resp.usage, "cache_creation_input_tokens", 0) or 0

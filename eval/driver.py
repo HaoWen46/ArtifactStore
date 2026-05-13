@@ -47,13 +47,21 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES_DIR = PROJECT_ROOT / "eval" / "fixtures"
 RUNS_DIR = PROJECT_ROOT / "eval" / "runs"
 
-# Per-run pricing for cost estimation. DeepSeek V4 Pro discounted prices as
-# of 2026-05; update if the rate card changes. Source:
-# https://api-docs.deepseek.com/quick_start/pricing
+# Per-run pricing for cost estimation. Rates updated 2026-05; refresh if
+# the provider rate cards change.
+#   DeepSeek: https://api-docs.deepseek.com/quick_start/pricing
+#   Qwen:     https://www.alibabacloud.com/help/en/model-studio/billing
 PRICE_PER_MTOK = {
-    "deepseek-v4-pro": {"input": 0.435, "output": 0.87},
-    "deepseek-v4-flash": {"input": 0.14, "output": 0.28},
-    "claude-sonnet-4-5": {"input": 3.0, "output": 15.0},
+    "deepseek-v4-pro":     {"input": 0.435, "output": 0.87},
+    "deepseek-v4-flash":   {"input": 0.14,  "output": 0.28},
+    "qwen3-max":           {"input": 1.6,   "output": 6.4},
+    "qwen3.6-plus":        {"input": 0.8,   "output": 2.4},
+    "qwen3.5-plus":        {"input": 0.8,   "output": 2.0},
+    "qwen-plus":           {"input": 0.4,   "output": 1.2},
+    "qwen-flash":          {"input": 0.05,  "output": 0.4},
+    "qwen-turbo":          {"input": 0.05,  "output": 0.2},
+    "qwen3-coder-plus":    {"input": 1.0,   "output": 5.0},
+    "qwen3-coder-flash":   {"input": 0.3,   "output": 1.5},
 }
 
 

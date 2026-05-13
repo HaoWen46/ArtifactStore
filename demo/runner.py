@@ -2,7 +2,7 @@
 subagent. Replay-mode by default — uses fixtures from eval/fixtures/.
 
 Loads `.env` at the project root before constructing the Agent so users can
-keep `ANTHROPIC_API_KEY` and `ANTHROPIC_BASE_URL` out of their shell rc.
+keep `DEEPSEEK_API_KEY` / `QWEN_API_KEY` out of their shell rc.
 """
 from __future__ import annotations
 
@@ -136,6 +136,10 @@ def demo(*, db: str, kind: str, target: str, model: str,
     has_key = "yes" if d["key_present"] else f"NO — set {d['key_env']} (will fail)"
     print(f"[runner] model={model} provider={d['provider']} "
           f"base_url={resolved_base} api_key={has_key}")
+    if d["provider"] == "UNKNOWN":
+        raise SystemExit(
+            f"[runner] aborting: {d.get('error', 'unknown provider')}"
+        )
 
     sup = Agent(
         name="supervisor",
@@ -260,10 +264,7 @@ def _verify_tool_choice(model: str, base_url: str | None) -> int:
     from demo.providers import resolve
     api_key, default_base_url, _ = resolve(model)
     resolved_base = base_url or default_base_url
-    client_kwargs = {"api_key": api_key}
-    if resolved_base:
-        client_kwargs["base_url"] = resolved_base
-    client = Anthropic(**client_kwargs)
+    client = Anthropic(api_key=api_key, base_url=resolved_base)
     print(f"[probe] {model} via {client.base_url} — forcing tool_choice=goodbye"
           f" while asking for hello ...")
     # Try named tool_choice first; if rejected, fall back to "any".
@@ -349,12 +350,14 @@ def main() -> None:
     p.add_argument("--kind", default="pytest")
     p.add_argument("--target", default="auth_expiry")
     p.add_argument("--model", default=DEFAULT_MODEL,
-                   help="Model id (default: deepseek-v4-pro). Use any model "
-                        "the configured provider supports.")
+                   help="Model id (default: deepseek-v4-pro). Use deepseek-* "
+                        "or qwen* prefixes — the provider is resolved from "
+                        "the prefix.")
     p.add_argument("--base-url", default=None,
-                   help="Override provider endpoint (else ANTHROPIC_BASE_URL "
-                        "env var, else native Anthropic). For DeepSeek: "
-                        "https://api.deepseek.com/anthropic")
+                   help="Override provider endpoint. By default the URL is "
+                        "resolved from the model prefix: DeepSeek -> "
+                        "https://api.deepseek.com/anthropic, Qwen -> "
+                        "https://dashscope-intl.aliyuncs.com/apps/anthropic.")
     p.add_argument("--policy",
                    choices=[v.value for v in ViewPolicy],
                    default=ViewPolicy.ARTIFACT.value)

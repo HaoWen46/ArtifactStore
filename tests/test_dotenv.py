@@ -52,7 +52,7 @@ def test_does_not_override_existing_env_by_default(tmp_path: Path, monkeypatch):
 
 
 def test_empty_existing_value_is_treated_as_unset(tmp_path: Path, monkeypatch):
-    """Common gotcha: a shell rc with `export ANTHROPIC_API_KEY=` exports an
+    """Common gotcha: a shell rc with `export DEEPSEEK_API_KEY=` exports an
     empty string. Treating that as 'already set' would silently swallow the
     real value from .env. Empty -> .env wins (matches python-dotenv)."""
     monkeypatch.setenv("MAYBE_EMPTY", "")
@@ -80,9 +80,9 @@ def test_deepseek_pair_propagates_to_agent(tmp_path: Path, monkeypatch):
     by the runner helper, and a freshly constructed Agent (default model
     deepseek-v4-pro) picks up the URL. No network calls — just verify the
     SDK client carries the configured URL."""
-    for var in ("ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL",
-                "DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL",
-                "QWEN_API_KEY", "QWEN_BASE_URL"):
+    for var in ("DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL",
+                "QWEN_API_KEY", "QWEN_BASE_URL",
+                "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"):
         monkeypatch.delenv(var, raising=False)
     p = _write(tmp_path / ".env",
                'DEEPSEEK_API_KEY="test-key-not-used"\n'
@@ -103,6 +103,6 @@ def test_real_dotenv_has_required_keys_if_present():
         pytest.skip("no project .env")
     content = project_env.read_text()
     assert any(f"{name}=" in content for name in
-               ("DEEPSEEK_API_KEY", "QWEN_API_KEY", "ANTHROPIC_API_KEY")), \
-        "project .env exists but has none of DEEPSEEK_API_KEY / " \
-        "QWEN_API_KEY / ANTHROPIC_API_KEY"
+               ("DEEPSEEK_API_KEY", "QWEN_API_KEY")), \
+        "project .env exists but has neither DEEPSEEK_API_KEY nor " \
+        "QWEN_API_KEY"
