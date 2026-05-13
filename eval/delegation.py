@@ -149,6 +149,11 @@ class DelegationResult:
     elapsed_seconds: float
     estimated_cost_usd: float
     error: str | None = None
+    # Pre-run setup tokens (for D1_LLM_SUMMARY's summarizer call). 0 for
+    # deterministic strategies. Folded into estimated_cost_usd by the
+    # driver so cost numbers stay apples-to-apples.
+    setup_input_tokens: int = 0
+    setup_output_tokens: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +169,28 @@ def _empty_sub_metrics() -> dict:
         "total_input": 0, "output_tokens": 0,
         "turns": 0, "tool_calls": 0, "stop_reason": "",
         "diagnosis": "", "submitted": False, "blocked_reads": 0,
+        # Pre-run setup tokens (e.g., D1_LLM_SUMMARY summarizer). Default 0.
+        "setup_input": 0, "setup_output": 0,
     }
+
+
+D1_LLM_SUMMARIZER_SYSTEM = """\
+You are a summarizer that compresses tool output for a debugging subagent.
+The subagent will see ONLY your summary and must use it to identify the
+root cause of a failure.
+
+Preserve verbatim:
+  - error messages and assertion text
+  - failing file paths, line numbers, test names
+  - WARNING / ERROR log lines that name the relevant code
+  - exception types with their specific arguments
+  - timestamps, hashes, IDs the engineer would quote
+
+Drop: passing-test progress dots, startup/teardown noise that doesn't name
+failing code, benchmark / coverage tables unrelated to the failure.
+
+Format: prose with short bullets. Under 250 tokens. Do NOT diagnose.
+"""
 
 
 def _setup_d1_summary(store: ArtifactStore, fixture_data: str,
@@ -222,6 +248,85 @@ def _setup_d1_summary(store: ArtifactStore, fixture_data: str,
                            "properties": {"task": {"type": "string"}},
                            "required": ["task"]},
              fn=_delegate_d1),
+    ]
+    return tools, sub_metrics
+
+
+def _setup_d1_llm_summary(store: ArtifactStore, fixture_data: str,
+                          fixture_meta: dict, model: str,
+                          max_turns: int) -> tuple[list[Tool], dict]:
+    """D1' — LLM-generated summary delegation. Mirrors D1_SUMMARY but uses
+    an LLM call to produce the summary the supervisor passes to the
+    subagent. Summarizer runs once at setup time; tokens recorded on
+    sub_metrics['setup_*'] so the driver folds them into cost."""
+    summarizer = Agent(
+        name="d1_llm_summarizer",
+        system=D1_LLM_SUMMARIZER_SYSTEM,
+        tools=[],
+        config=ModelConfig(model=model, max_turns=1, max_tokens=512),
+        verbose=False,
+    )
+    instruction = (
+        f"Summarize the following {fixture_meta['kind']} output for a "
+        f"downstream debugger.\n\n<output>\n{fixture_data}\n</output>"
+    )
+    sresult = summarizer.run(instruction)
+    summary = sresult.final_text.strip() or deterministic_summary(fixture_data)
+
+    sub_metrics = _empty_sub_metrics()
+    sub_metrics["setup_input"] = sresult.total_input_tokens
+    sub_metrics["setup_output"] = sresult.output_tokens
+
+    def _run_workload_d1_llm(kind: str, target: str) -> dict:
+        return {
+            "policy": "summary",
+            "summary": summary,
+            "artifact_type": fixture_meta["artifact_type"],
+            "raw_token_count": estimate(fixture_data),
+            "summary_source": "llm",
+        }
+
+    def _delegate_d1_llm(task: str) -> dict:
+        sub = Agent(
+            name="sub_d1_llm", system=SUBAGENT_NO_TOOLS_SYSTEM, tools=[],
+            config=ModelConfig(model=model, max_turns=max_turns),
+        )
+        user = (f"<task>\n{task}\n</task>\n"
+                f"<summary>\n{summary}\n</summary>")
+        r = sub.run(user)
+        sub_metrics.update({
+            "input_tokens": r.input_tokens,
+            "cache_read": r.cache_read_input_tokens,
+            "cache_creation": r.cache_creation_input_tokens,
+            "total_input": r.total_input_tokens,
+            "output_tokens": r.output_tokens,
+            "turns": r.turns, "tool_calls": r.tool_calls,
+            "stop_reason": r.stop_reason,
+            "diagnosis": r.final_text,
+            "submitted": bool(r.final_text.strip()),
+            "blocked_reads": 0,
+        })
+        return {"diagnosis": r.final_text,
+                "input_tokens": r.input_tokens,
+                "output_tokens": r.output_tokens}
+
+    tools = [
+        Tool(name="run_workload",
+             description="Run a workload and get back an LLM-generated SUMMARY "
+                         "of its output (lossy). The summary is inlined into "
+                         "your context.",
+             input_schema={"type": "object",
+                           "properties": {"kind": {"type": "string"},
+                                          "target": {"type": "string"}},
+                           "required": ["kind", "target"]},
+             fn=_run_workload_d1_llm),
+        Tool(name="delegate",
+             description="Spawn the subagent with the summary in your context "
+                         "and a focused task. Returns the subagent's diagnosis.",
+             input_schema={"type": "object",
+                           "properties": {"task": {"type": "string"}},
+                           "required": ["task"]},
+             fn=_delegate_d1_llm),
     ]
     return tools, sub_metrics
 
@@ -404,9 +509,10 @@ def _setup_d3_scoped(store: ArtifactStore, fixture_data: str,
 
 
 STRATEGIES: dict[str, Callable[..., tuple[list[Tool], dict]]] = {
-    "D1_SUMMARY": _setup_d1_summary,
+    "D1_SUMMARY":     _setup_d1_summary,
+    "D1_LLM_SUMMARY": _setup_d1_llm_summary,
     "D2_FULL_CONTEXT": _setup_d2_full,
-    "D3_SCOPED": _setup_d3_scoped,
+    "D3_SCOPED":      _setup_d3_scoped,
 }
 
 
@@ -473,6 +579,10 @@ def _run_one(*, fixture: str, strategy: str, rep: int, model: str,
         + (parent_cr + sub_metrics["cache_read"]) * rates["input"] * 0.1
         + (parent_out + sub_metrics["output_tokens"]) * rates["output"]
     ) / 1_000_000
+    setup_in = sub_metrics.get("setup_input", 0)
+    setup_out = sub_metrics.get("setup_output", 0)
+    cost += (setup_in * rates["input"]
+             + setup_out * rates["output"]) / 1_000_000
 
     return DelegationResult(
         run_id=run_id,
@@ -509,6 +619,8 @@ def _run_one(*, fixture: str, strategy: str, rep: int, model: str,
         elapsed_seconds=elapsed,
         estimated_cost_usd=cost,
         error=error,
+        setup_input_tokens=setup_in,
+        setup_output_tokens=setup_out,
     )
 
 

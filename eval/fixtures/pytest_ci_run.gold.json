@@ -1,0 +1,32 @@
+{
+  "fixture": "pytest_ci_run.log",
+  "artifact_type": "pytest_failure",
+  "ground_truth": {
+    "diagnosis_keywords": ["timezone", "utc", "naive", "now", "exp"],
+    "key_evidence": [
+      {
+        "span_type": "assertion",
+        "must_contain": "AssertionError: token expired prematurely",
+        "file_path": "tests/test_auth.py",
+        "line": 84
+      },
+      {
+        "span_type": "log_warning",
+        "must_contain": "now=2026-05-07T08:30:00 exp=2026-05-07T01:00:00+00:00",
+        "file_path": "auth.py",
+        "line": 117
+      }
+    ],
+    "expected_failed_tests": [
+      "tests/test_auth.py::TestAuthExpiry::test_auth_expiry",
+      "tests/test_billing/test_refunds.py::TestPartialRefund::test_refund_partial_amount",
+      "tests/test_db/test_migrations.py::TestMigration0042::test_migrate_0042_backfill",
+      "tests/test_db/test_query.py::TestJoin::test_query_with_join_returns_correct_count",
+      "tests/test_api/test_invoices_endpoint.py::TestInvoicesList::test_invoices_list_endpoint_pagination",
+      "tests/test_workers/test_indexer.py::TestPartialReindex::test_indexer_partial_reindex"
+    ],
+    "expected_pass_count": 706,
+    "expected_fail_count": 6
+  },
+  "notes": "10K-token CI fixture (pytest_large_run's bigger sibling). Same auth_expiry timezone bug, but buried in heavier startup logs, longer captured-log blocks per failure, ~700 tests across more modules, plus end-of-run flaky-history and stability-summary tail sections. The flaky-history section explicitly flags auth_expiry as a NEW (regression) failure, which is the diagnostic signal a human SRE would key on. B2 truncation at 200 tokens cuts off in the startup INFO block before progress; B3 deterministic summary preserves the WARNING lines but loses the regression context. B4 should locate the auth_expiry assertion span via search and produce a focused citation-backed diagnosis."
+}

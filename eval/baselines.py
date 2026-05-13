@@ -4,11 +4,12 @@ Each baseline is a function `(store, fixture_data, fixture_meta) -> Setup`
 where Setup is the (system_prompt, user_message, tools, baseline_meta) tuple
 the eval driver passes into Agent.run().
 
-The four baselines differ only in what context the agent receives:
-  B1 RAW       — full raw output inline in user message
-  B2 TRUNCATED — first N tokens of raw inline
-  B3 SUMMARY   — deterministic offline summary inline
-  B4 ARTIFACT  — handle inline + artifact_* tools to expand on demand
+The five baselines differ only in what context the agent receives:
+  B1 RAW            — full raw output inline in user message
+  B2 TRUNCATED      — first N tokens of raw inline
+  B3 SUMMARY        — deterministic offline summary inline
+  B3 LLM_SUMMARY    — LLM-generated summary inline (one extra paid call)
+  B4 ARTIFACT       — handle inline + artifact_* tools to expand on demand
 
 Models, temperature, and tasks stay constant across baselines so the
 difference attributes to the context strategy, not noise.
@@ -20,7 +21,7 @@ from typing import Any, Callable
 
 from artifactstore import ArtifactStore
 from artifactstore.tokens import estimate
-from demo.agent import Tool
+from demo.agent import Agent, ModelConfig, Tool
 from demo.workloads import deterministic_summary
 
 
@@ -61,6 +62,16 @@ class Setup:
     grant_id: str | None = None       # B4 only
     artifact_id: str | None = None    # B4 only
     extra: dict[str, Any] = field(default_factory=dict)
+    # Pre-run cost in USD (for baselines that make summarization calls
+    # before the measurable run, like B3_LLM_SUMMARY). Added to the
+    # final run's estimated_cost_usd by the eval driver so headline
+    # cost numbers stay apples-to-apples.
+    setup_cost_usd: float = 0.0
+    # Pre-run token usage attributed to setup (e.g., summarizer LLM call).
+    # Stored separately so the eval driver can fold them into reported
+    # token totals without conflating with the agent's own measurement.
+    setup_input_tokens: int = 0
+    setup_output_tokens: int = 0
 
 
 def _diagnostic_phrase(fixture_meta: dict) -> str:
@@ -124,6 +135,74 @@ def b3_summary(store: ArtifactStore, fixture_data: str,
         f"<summary>\n{summary}\n</summary>"
     )
     return Setup(system=B1_B2_B3_SYSTEM, user_message=user, tools=[])
+
+
+B3_LLM_SUMMARIZER_SYSTEM = """\
+You are a summarizer that compresses tool output for a downstream debugging
+agent. The downstream agent will see ONLY your summary, not the raw output,
+and must use it to identify the root cause of a failure.
+
+Preserve everything diagnostically critical:
+  - error messages and assertion text verbatim (do not paraphrase)
+  - the failing file path, line number, and test name
+  - WARNING / ERROR log lines that name the relevant code (e.g.,
+    `WARNING auth.py:117 token rejected: now=... exp=...`)
+  - exception types and their specific arguments
+  - any timestamps, hashes, IDs, or other concrete values an engineer
+    would quote when diagnosing
+
+Drop:
+  - passing-test progress dots
+  - startup/teardown noise that doesn't name the failing code
+  - benchmark / coverage tables unrelated to the failure
+
+Format: plain prose with short bulleted sections. Keep under 250 tokens.
+Do NOT diagnose — produce a faithful summary; downstream agent decides.
+"""
+
+
+def b3_llm_summary(store: ArtifactStore, fixture_data: str,
+                   fixture_meta: dict,
+                   *, summarizer_model: str = "deepseek-v4-pro") -> Setup:
+    """B3' — LLM-generated summary rather than regex.
+
+    Calls the same Anthropic-Messages-API endpoint as the agent loop (so
+    ANTHROPIC_BASE_URL routes it through DeepSeek by default; no extra
+    plumbing). One-shot summarization, no tools. Token cost is accounted
+    on Setup.setup_* fields and folded into the run's reported total by
+    the driver — keeps cost numbers apples-to-apples against B3
+    (deterministic, $0 setup).
+    """
+    summarizer = Agent(
+        name="b3_llm_summarizer",
+        system=B3_LLM_SUMMARIZER_SYSTEM,
+        tools=[],
+        config=ModelConfig(model=summarizer_model, max_turns=1,
+                           max_tokens=512),
+        verbose=False,
+    )
+    instruction = (
+        f"Summarize the following {fixture_meta['kind']} output for a "
+        f"downstream debugger.\n\n<output>\n{fixture_data}\n</output>"
+    )
+    result = summarizer.run(instruction)
+    summary = result.final_text.strip() or deterministic_summary(fixture_data)
+
+    user = (
+        f"{_diagnostic_phrase(fixture_meta)} "
+        f"You only have a summary produced by an LLM summarizer; the raw "
+        f"output was not preserved.\n\n"
+        f"<summary>\n{summary}\n</summary>"
+    )
+    return Setup(
+        system=B1_B2_B3_SYSTEM, user_message=user, tools=[],
+        setup_input_tokens=result.total_input_tokens,
+        setup_output_tokens=result.output_tokens,
+        # Cost computed by driver using its rate card.
+        extra={"summarizer_model": summarizer_model,
+               "summary_chars": len(summary),
+               "summary_tokens": estimate(summary)},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -239,8 +318,9 @@ def b4_artifactstore(store: ArtifactStore, fixture_data: str,
 
 
 BASELINES: dict[str, Callable[..., Setup]] = {
-    "B1_RAW":       b1_raw,
-    "B2_TRUNCATED": b2_truncated,
-    "B3_SUMMARY":   b3_summary,
-    "B4_ARTIFACT":  b4_artifactstore,
+    "B1_RAW":         b1_raw,
+    "B2_TRUNCATED":   b2_truncated,
+    "B3_SUMMARY":     b3_summary,
+    "B3_LLM_SUMMARY": b3_llm_summary,
+    "B4_ARTIFACT":    b4_artifactstore,
 }

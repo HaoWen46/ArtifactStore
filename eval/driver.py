@@ -80,6 +80,13 @@ FIXTURE_REGISTRY: dict[str, dict] = {
                                 "artifact_type": "pytest_failure",
                                 "ext": ".log",
                                 "reveal_target": False},
+    # ~10K-token CI log with 6 failures. Same auth_expiry bug as
+    # pytest_large_run, buried in heavier startup logs and a longer
+    # flaky-history tail. Target hidden — the agent must discover.
+    "pytest_ci_run":          {"kind": "pytest", "target": "auth_expiry",
+                                "artifact_type": "pytest_failure",
+                                "ext": ".log",
+                                "reveal_target": False},
     "rg_grep_noise":          {"kind": "grep",   "target": "todos",
                                 "artifact_type": "grep_result",
                                 "ext": ".txt",
@@ -132,6 +139,12 @@ class RunResult:
     estimated_cost_usd: float
     # Provenance
     error: str | None = None
+    # Pre-run setup tokens (e.g., B3_LLM_SUMMARY's summarizer call). 0 for
+    # deterministic baselines. Recorded separately so cost numbers fold the
+    # full pipeline while analyses can split agent-context tokens from
+    # setup-stage tokens.
+    setup_input_tokens: int = 0
+    setup_output_tokens: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +227,19 @@ def _run_one(*, fixture: str, baseline: str, rep: int, model: str,
         + out_tok * rates["output"]
     ) / 1_000_000
 
+    # Fold any pre-run setup cost (B3_LLM_SUMMARY pays a one-shot
+    # summarization call per setup; deterministic baselines pay 0).
+    setup_in = setup.setup_input_tokens
+    setup_out = setup.setup_output_tokens
+    setup_cost = (
+        setup_in * rates["input"] + setup_out * rates["output"]
+    ) / 1_000_000
+    cost += setup_cost
+    # The summarizer's tokens were *seen by an LLM* but were not part of the
+    # measured agent's context — fold them into the run's total_input_tokens
+    # so the cost story stays apples-to-apples but mark them via a separate
+    # field so analyses can split them out.
+
     return RunResult(
         run_id=run_id,
         fixture=fixture,
@@ -240,6 +266,8 @@ def _run_one(*, fixture: str, baseline: str, rep: int, model: str,
         elapsed_seconds=elapsed,
         estimated_cost_usd=cost,
         error=error,
+        setup_input_tokens=setup_in,
+        setup_output_tokens=setup_out,
     ), audit_rows
 
 

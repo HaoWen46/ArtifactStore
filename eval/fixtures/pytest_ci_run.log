@@ -1,0 +1,540 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.9, pytest-8.2.1, pluggy-1.5.0
+rootdir: /var/build/ci-runner/example-app
+configfile: pyproject.toml
+plugins: anyio-4.3.0, asyncio-0.23.6, cov-5.0.0, freezegun-0.4.2, hypothesis-6.100.1, xdist-3.6.1, rerunfailures-14.0, timeout-2.3.1
+benchmark: 4.0.0 (defaults: timer=time.perf_counter disable_gc=False warmup=False warmup_iterations=100000)
+asyncio: mode=Mode.STRICT
+hypothesis profile 'ci' -> database=DirectoryBasedExampleDatabase('/var/build/ci-runner/.hypothesis/examples')
+xdist: 8 worker processes (--numprocesses=8 --dist=loadfile)
+timeout: 60.0s (method: signal)
+rootdir: /var/build/ci-runner/example-app
+collected 712 items / 3 deselected
+
+----------------------------- live log session ---------------------------------
+INFO     app.db:db.py:34 connecting to test database postgresql://test_user@db-ci-01.internal:5432/test_db_ci
+INFO     app.db:db.py:42 connection pool initialized: min=5 max=20 timeout=30
+INFO     app.cache:cache.py:18 redis cache initialized: cache-ci-01.internal:6379/0
+INFO     app.cache:cache.py:24 redis cluster mode: disabled (single-node test env)
+INFO     app.auth:auth.py:21 loaded signing key from /var/build/ci-runner/.secrets/signing.pem
+INFO     app.auth:auth.py:28 jwks endpoint registered: /.well-known/jwks.json
+INFO     app.workers:workers.py:55 worker pool started: 8 workers
+INFO     app.workers:workers.py:62 background queue: rabbitmq://mq-ci-01.internal:5672/test
+INFO     app.api:api.py:128 FastAPI application starting up
+INFO     app.api:api.py:135 OpenAPI schema generated: 187 routes
+INFO     app.api:api.py:142 middleware chain installed: cors, auth, ratelimit, request_id, audit
+INFO     app.observability:tracing.py:67 OpenTelemetry tracer configured: exporter=otlp endpoint=http://tempo-ci.internal:4317
+INFO     app.observability:metrics.py:42 prometheus registry: app=example-app environment=ci
+INFO     app.observability:metrics.py:48 exposing /metrics on port 9090
+INFO     app.observability:logging.py:31 structlog configured: format=json level=DEBUG
+INFO     app.observability:logging.py:38 redirecting stdlib logging to structlog
+INFO     app.observability:audit.py:24 audit log sink: postgresql://test_user@db-ci-01.internal:5432/test_db_ci/audit
+INFO     app.featureflags:flags.py:18 launchdarkly client initialized: env=ci offline_mode=False
+INFO     app.featureflags:flags.py:24 flag values cached: 47 flags
+INFO     app.email:smtp.py:42 SMTP relay configured: mailhog-ci.internal:1025
+INFO     app.email:templates.py:31 loaded 28 email templates from app/email/templates/
+INFO     app.search:opensearch.py:55 opensearch client: opensearch-ci-01.internal:9200 (single node)
+INFO     app.search:opensearch.py:62 index 'invoices' aliased to 'invoices-v3-2026-04'
+INFO     app.search:opensearch.py:68 index 'users' aliased to 'users-v2-2026-03'
+INFO     app.search:opensearch.py:74 index 'audit' aliased to 'audit-v1-2026-01'
+INFO     app.compliance:pii.py:42 PII redaction patterns loaded: 47 rules
+INFO     app.compliance:audit_log.py:28 compliance audit retention: 7 years
+INFO     app.ratelimit:redis_limiter.py:34 rate limiter backend: redis (cache-ci-01.internal:6379/2)
+INFO     app.ratelimit:redis_limiter.py:42 default tier limits: 100/min, 1000/hour, 10000/day
+INFO     app.session:sessions.py:38 session backend: redis (cache-ci-01.internal:6379/1) ttl=86400
+INFO     app.csrf:tokens.py:26 CSRF protection initialized: header=X-CSRF-Token cookie=csrftoken
+INFO     app.cors:middleware.py:24 CORS allow-origins: https://app.example.com, https://admin.example.com
+INFO     app.healthcheck:checks.py:32 health checks registered: db, cache, queue, opensearch, s3
+INFO     app.ratelimit:bucket.py:48 bucket warmup: 0/1000 tokens
+tests/test_billing/test_charges.py ...........................          [  2%]
+tests/test_billing/test_invoices.py .................                   [  4%]
+tests/test_billing/test_refunds.py .........F.....                      [  5%]
+tests/test_billing/test_subscriptions.py ........................       [  8%]
+tests/test_billing/test_proration.py ..............                     [  9%]
+tests/test_billing/test_tax.py ....................                     [ 11%]
+tests/test_billing/test_payment_methods.py ....................         [ 14%]
+tests/test_billing/test_discounts.py .................                  [ 15%]
+tests/test_billing/test_credits.py ............                         [ 16%]
+tests/test_billing/test_dunning.py ..............                       [ 18%]
+tests/test_cache/test_evict.py ...................                      [ 20%]
+tests/test_cache/test_get.py ........................                   [ 23%]
+tests/test_cache/test_set.py ......................                     [ 25%]
+tests/test_cache/test_ttl.py ...................                        [ 27%]
+tests/test_cache/test_invalidation.py ...............                   [ 29%]
+tests/test_cache/test_cluster_failover.py .........                     [ 30%]
+tests/test_cache/test_pubsub.py ............                            [ 32%]
+tests/test_login.py ..........                                          [ 33%]
+tests/test_refresh.py ........                                          [ 34%]
+tests/test_auth.py .....F.....                                          [ 36%]
+tests/test_session.py ............                                      [ 38%]
+tests/test_oauth.py ......                                              [ 39%]
+tests/test_passwordless.py .........                                    [ 40%]
+tests/test_mfa.py ................                                      [ 42%]
+tests/test_saml.py ............                                         [ 43%]
+tests/test_db/test_migrations.py ..............F....                    [ 46%]
+tests/test_db/test_query.py ......................F                     [ 49%]
+tests/test_db/test_pool.py ...............                              [ 51%]
+tests/test_db/test_transaction.py ...........                           [ 52%]
+tests/test_db/test_replica.py .........                                 [ 53%]
+tests/test_db/test_failover.py .......                                  [ 54%]
+tests/test_db/test_constraints.py ..................                    [ 56%]
+tests/test_db/test_views.py ............                                [ 58%]
+tests/test_api/test_health.py .....                                     [ 58%]
+tests/test_api/test_invoices_endpoint.py ....................F          [ 61%]
+tests/test_api/test_users.py ........................                   [ 64%]
+tests/test_api/test_oauth_endpoint.py ............                      [ 66%]
+tests/test_api/test_billing_endpoint.py ..............                  [ 68%]
+tests/test_api/test_webhooks.py ..................                      [ 70%]
+tests/test_api/test_admin.py ..................                         [ 73%]
+tests/test_api/test_search.py ....................                      [ 75%]
+tests/test_api/test_ratelimit.py ............                           [ 77%]
+tests/test_api/test_idempotency.py ............                         [ 79%]
+tests/test_workers/test_email.py ..................                     [ 81%]
+tests/test_workers/test_pdf.py .........                                [ 82%]
+tests/test_workers/test_export.py ...........                           [ 84%]
+tests/test_workers/test_indexer.py ..F.................                 [ 86%]
+tests/test_workers/test_notifier.py ............                        [ 88%]
+tests/test_workers/test_dlq.py .........                                [ 89%]
+tests/test_observability/test_tracing.py ..............                 [ 91%]
+tests/test_observability/test_metrics.py ............                   [ 92%]
+tests/test_observability/test_logging.py .............                  [ 94%]
+tests/test_compliance/test_pii.py ........                              [ 95%]
+tests/test_compliance/test_audit_log.py ..............                  [ 96%]
+tests/test_compliance/test_gdpr_export.py ........                      [ 97%]
+tests/test_compliance/test_retention.py ........                        [ 98%]
+tests/test_integration/test_checkout.py .........                       [ 99%]
+tests/test_integration/test_signup_flow.py .....                        [100%]
+
+=================================== FAILURES ===================================
+___________________________ test_refund_partial_amount ___________________________
+
+self = <tests.test_billing.test_refunds.TestPartialRefund object at 0x7f0a23e7f0>
+
+    def test_refund_partial_amount(self):
+        invoice = create_invoice(customer_id="cus_42", amount_cents=10_000)
+        capture_payment(invoice.id)
+        # Refund half the amount
+        result = refund(invoice.id, amount_cents=5_000)
+>       assert result.amount_cents == 5_000
+E       AssertionError: assert 4999 == 5000
+E        +  where 4999 = <Refund id=ref_88a3 amount_cents=4999>.amount_cents
+
+tests/test_billing/test_refunds.py:138: AssertionError
+------------------------------ Captured stdout call -------------------------------
+[billing] creating invoice cus_42 amount=10000
+[billing] invoice inv_4d9e captured
+[billing] refund requested: invoice=inv_4d9e amount=5000
+[billing] processor returned: amount=4999 fee=1 reason=rounding
+[billing] refund recorded: ref_88a3
+[billing] webhook posted to https://hooks.example.com/refunds status=200
+[billing] webhook delivery confirmed in 42ms
+------------------------------ Captured log call -------------------------------
+INFO     billing.refund:refund.py:84 partial refund processor returned 4999/5000 (fee=1)
+INFO     billing.refund:refund.py:88 ledger entry recorded: txn_8f3a
+WARNING  billing.refund:refund.py:97 amount mismatch: requested=5000 received=4999
+INFO     billing.refund:refund.py:102 refund accepted with rounding discrepancy under 1c tolerance
+DEBUG    billing.refund:refund.py:108 processor metadata: provider=stripe rounding_mode=bankers
+INFO     billing.audit:audit.py:24 audit row written: txn_8f3a actor=test_runner action=refund
+INFO     billing.ledger:ledger.py:88 ledger balance updated: account=acct_42 delta=-4999
+INFO     billing.notifications:email.py:42 refund_completed email queued: cus_42@example.com
+DEBUG    billing.notifications:email.py:48 email template: refund_completed v3
+DEBUG    billing.notifications:email.py:55 email rendered: 2418 bytes
+INFO     billing.metrics:counters.py:18 incremented counter: refunds.completed{currency=usd} +1
+INFO     billing.metrics:counters.py:18 incremented counter: refunds.amount_cents{currency=usd} +4999
+INFO     billing.metrics:histograms.py:24 observed histogram: refunds.duration_ms 142
+
+___________________________ test_auth_expiry ___________________________
+
+self = <tests.test_auth.TestAuthExpiry object at 0x7f1c2d50e0>
+
+    def test_auth_expiry(self):
+        token = mint_token(user_id=42, ttl_seconds=3600)
+        # advance the clock by 30 minutes; token should still be valid
+        with freeze_time(datetime.now() + timedelta(minutes=30)):
+>           assert validate_token(token) is True, "token expired prematurely"
+E           AssertionError: token expired prematurely
+E           assert False is True
+E            +  where False = validate_token('eyJhbGciOi...truncated...')
+
+tests/test_auth.py:84: AssertionError
+------------------------------ Captured stdout call -------------------------------
+[auth] mint_token user_id=42 ttl_seconds=3600
+[auth] token issued: eyJhbGciOi...truncated...
+[auth] validate_token called
+[auth] payload exp=2026-05-07T01:00:00+00:00
+[auth] now=2026-05-07T08:30:00 (clock advanced by freeze_time)
+[auth] result: token rejected
+------------------------------ Captured log call -------------------------------
+DEBUG    app.auth:auth.py:101 validating token len=171
+DEBUG    app.auth:auth.py:108 decoded payload sub=42 iat=2026-05-07T08:00:00 exp=2026-05-07T01:00:00+00:00
+WARNING  app.auth:auth.py:117 token rejected: now=2026-05-07T08:30:00 exp=2026-05-07T01:00:00+00:00
+DEBUG    app.auth:auth.py:120 returning False
+DEBUG    app.auth:auth.py:124 validate_token completed in 0.42ms
+INFO     app.auth.audit:audit.py:55 auth.token.rejected user_id=42 reason=expired_pre_check
+DEBUG    app.auth.audit:audit.py:58 audit row payload: {"user_id": 42, "reason": "expired_pre_check", "ts": "2026-05-07T08:30:00"}
+INFO     app.auth.metrics:metrics.py:18 incremented counter: auth.token.rejected{reason=expired_pre_check} +1
+DEBUG    app.auth.audit:audit.py:62 audit row persisted: id=audit_t9rxk2
+DEBUG    app.session:sessions.py:88 session destruction triggered by token rejection
+DEBUG    app.session:sessions.py:91 redis DEL session:42:eyJhbGciOi... 1 key removed
+DEBUG    app.session:sessions.py:95 publish session.destroyed channel: 1 subscriber notified
+DEBUG    app.observability:tracing.py:142 span auth.validate_token closed: status=error error.kind=expired
+
+___________________________ test_migrate_0042_backfill ___________________________
+
+self = <tests.test_db.test_migrations.TestMigration0042 object at 0x7f4a1240c0>
+db_engine = <Engine(postgresql://test_user@db-ci-01.internal:5432/test_db_ci)>
+
+    def test_migrate_0042_backfill(self, db_engine):
+        # Apply migration 0041 (creates the column as NULLable).
+        run_migration(db_engine, "0041_add_user_tier")
+        # Insert rows BEFORE the backfill.
+        for i in range(1000):
+            db_engine.execute(
+                "INSERT INTO users (email, tier) VALUES (?, NULL)",
+                (f"u{i}@example.com",)
+            )
+        # Apply 0042 which is supposed to backfill tier='free' and add NOT NULL.
+        run_migration(db_engine, "0042_backfill_tier_not_null")
+        result = db_engine.execute("SELECT COUNT(*) FROM users WHERE tier IS NULL").scalar()
+>       assert result == 0, f"expected 0 NULL rows after backfill, got {result}"
+E       AssertionError: expected 0 NULL rows after backfill, got 47
+E       assert 47 == 0
+
+tests/test_db/test_migrations.py:202: AssertionError
+------------------------------ Captured stderr call -------------------------------
+psycopg2.errors.SerializationFailure: could not serialize access due to concurrent update
+DETAIL: Reason code: Canceled on identification as a pivot, during commit attempt.
+HINT: The transaction might succeed if retried.
+LOCATION: TerminateOtherDBBackends, postinit.c:1234
+------------------------------ Captured log call -------------------------------
+INFO     db.migrate:migrate.py:42 applying 0042_backfill_tier_not_null
+INFO     db.migrate:migrate.py:54 backfilling tier=free for NULL rows in batches of 100
+DEBUG    db.migrate:migrate.py:58 batch 1: 100/100 updated
+DEBUG    db.migrate:migrate.py:58 batch 2: 100/100 updated
+DEBUG    db.migrate:migrate.py:58 batch 3: 100/100 updated
+DEBUG    db.migrate:migrate.py:58 batch 4: 100/100 updated
+DEBUG    db.migrate:migrate.py:58 batch 5: 100/100 updated
+DEBUG    db.migrate:migrate.py:58 batch 6: 100/100 updated
+DEBUG    db.migrate:migrate.py:58 batch 7: 100/100 updated
+DEBUG    db.migrate:migrate.py:58 batch 8: 100/100 updated
+WARNING  db.migrate:migrate.py:71 batch 9: 47 rows could not be updated due to lock contention
+ERROR    db.migrate:migrate.py:84 backfill incomplete; 47 of 1000 rows still NULL
+INFO     db.migrate:migrate.py:91 NOT NULL constraint NOT applied (would fail)
+INFO     db.migrate:migrate.py:96 migration 0042 rolled back; will retry on next deploy
+DEBUG    db.migrate:migrate.py:102 rollback completed in 312ms; 953 rows reverted
+INFO     db.migrate:audit.py:34 migration_audit row: migration_id=0042 status=failed retry_count=0
+WARNING  db.migrate:audit.py:42 backfill failure pattern matches MIGR-2026-04: see runbook
+INFO     db.migrate:metrics.py:18 incremented counter: migrations.attempted{result=failed} +1
+INFO     db.migrate:metrics.py:18 incremented counter: migrations.rows_attempted +1000
+INFO     db.migrate:metrics.py:18 incremented counter: migrations.rows_failed +47
+DEBUG    db.migrate:cleanup.py:24 cleanup advisory locks released: 3 held
+
+___________________________ test_query_with_join_returns_correct_count ___________________________
+
+self = <tests.test_db.test_query.TestJoin object at 0x7f8a3a90e0>
+
+    def test_query_with_join_returns_correct_count(self):
+        # Build a query with an outer join and count distinct users.
+        result = User.query.outerjoin(Order, User.id == Order.user_id).distinct().count()
+>       assert result == 247
+E       AssertionError: assert 0 == 247
+
+tests/test_db/test_query.py:312: AssertionError
+------------------------------ Captured log call -------------------------------
+DEBUG    sqlalchemy.engine.Engine:base.py:1837 SELECT COUNT(DISTINCT user.id) FROM user LEFT OUTER JOIN "order" ON user.id = "order".user_id
+DEBUG    sqlalchemy.engine.Engine:base.py:1842 [generated in 0.00012s] {}
+DEBUG    sqlalchemy.engine.Engine:base.py:1853 query execution time: 18.4ms
+WARNING  app.db:query.py:48 query returned 0 rows; suspected fixture loading failure
+WARNING  app.db:query.py:51 connection pool stats: active=0 idle=5 reset=2
+INFO     app.db:query.py:55 nb: user table appears empty at query time; check conftest.py session-scoped fixtures
+DEBUG    app.db:query.py:62 query plan: Aggregate(strategy=plain) -> HashAggregate -> Hash Left Join -> Seq Scan
+DEBUG    app.db:query.py:68 expected estimate: 247 distinct users (from analyze stats); actual: 0
+INFO     app.db.metrics:metrics.py:18 incremented counter: queries.executed{table=user} +1
+INFO     app.db.metrics:metrics.py:18 incremented counter: queries.zero_result{table=user} +1
+DEBUG    app.db:fixture_loader.py:38 fixture_loader session check: 0 rows in user table
+WARNING  app.db:fixture_loader.py:42 fixture conftest.py 'session_users' did not seed user table — investigate test isolation
+
+___________________________ test_invoices_list_endpoint_pagination ___________________________
+
+self = <tests.test_api.test_invoices_endpoint.TestInvoicesList object at 0x7fa12810e0>
+client = <TestClient app=<FastAPI title='example-app'>>
+
+    def test_invoices_list_endpoint_pagination(self, client):
+        # Create 25 invoices.
+        for i in range(25):
+            client.post("/invoices", json={"customer_id": f"cus_{i}", "amount": 1000})
+        # Page 1 should return 10 invoices, page 2 returns 10, page 3 returns 5.
+        r1 = client.get("/invoices?page=1&per_page=10")
+        r2 = client.get("/invoices?page=2&per_page=10")
+        r3 = client.get("/invoices?page=3&per_page=10")
+>       assert len(r3.json()["data"]) == 5
+E       AssertionError: assert 10 == 5
+E        +  where 10 = len([...10 items...])
+
+tests/test_api/test_invoices_endpoint.py:164: AssertionError
+------------------------------ Captured log call -------------------------------
+INFO     app.api:invoices.py:78 GET /invoices?page=1&per_page=10 -> 200 (10 items)
+INFO     app.api:invoices.py:78 GET /invoices?page=2&per_page=10 -> 200 (10 items)
+INFO     app.api:invoices.py:78 GET /invoices?page=3&per_page=10 -> 200 (10 items)
+WARNING  app.api:invoices.py:88 paginate ignored page param: page=3 returned same data as page=1
+WARNING  app.api:invoices.py:91 cursor not advancing; suspect off-by-one in offset calculation
+DEBUG    app.api:invoices.py:96 generated SQL: SELECT * FROM invoices LIMIT 10 OFFSET 0
+
+___________________________ test_indexer_partial_reindex ___________________________
+
+self = <tests.test_workers.test_indexer.TestPartialReindex object at 0x7fb29103a0>
+
+    def test_indexer_partial_reindex(self):
+        seed_documents(count=500)
+        triggers = trigger_reindex(filter={"updated_since": "1h"})
+>       assert triggers.expected_count == triggers.queued_count
+E       AssertionError: assert 500 == 487
+E        +  where 500 = <ReindexTrigger expected_count=500 queued_count=487>.expected_count
+
+tests/test_workers/test_indexer.py:218: AssertionError
+------------------------------ Captured log call -------------------------------
+INFO     workers.indexer:indexer.py:142 reindex triggered: filter={'updated_since': '1h'}
+INFO     workers.indexer:indexer.py:150 candidate query returned 500 documents
+WARNING  workers.indexer:indexer.py:168 13 documents skipped: missing required field 'tenant_id'
+INFO     workers.indexer:indexer.py:175 enqueued 487/500 reindex jobs to opensearch
+DEBUG    workers.indexer:indexer.py:182 reindex batch metadata: shard_count=4 routing_key=tenant_id
+INFO     workers.indexer:indexer.py:188 first batch sent to opensearch: 100 docs duration=88ms
+INFO     workers.indexer:indexer.py:188 second batch sent to opensearch: 100 docs duration=92ms
+INFO     workers.indexer:indexer.py:188 third batch sent to opensearch: 100 docs duration=89ms
+INFO     workers.indexer:indexer.py:188 fourth batch sent to opensearch: 100 docs duration=91ms
+INFO     workers.indexer:indexer.py:188 fifth batch sent to opensearch: 87 docs duration=78ms
+DEBUG    workers.indexer:indexer.py:192 opensearch bulk responses: all 200 OK
+INFO     workers.indexer:indexer.py:198 reindex completed: 487 indexed, 13 skipped (missing tenant_id)
+INFO     workers.metrics:metrics.py:18 incremented counter: indexer.docs.queued +487
+INFO     workers.metrics:metrics.py:18 incremented counter: indexer.docs.skipped{reason=missing_tenant_id} +13
+
+------------------------------ Captured warnings -------------------------------
+DeprecationWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html
+DeprecationWarning: distutils Version classes are deprecated. Use packaging.version instead.
+RuntimeWarning: coroutine 'AsyncSession.close' was never awaited (in conftest.py)
+PendingDeprecationWarning: pytest_asyncio.fixture(scope='session') without loop_scope is deprecated
+DeprecationWarning: 'sqlalchemy.engine.Engine.execute' is deprecated; use connection.execute()
+ResourceWarning: unclosed file <_io.TextIOWrapper name='/tmp/test_log_4d29.txt' mode='r' encoding='UTF-8'>
+ResourceWarning: unclosed transport <_SelectorSocketTransport ...>
+RuntimeWarning: line buffering (buffering=1) isn't supported in binary mode
+DeprecationWarning: ssl.PROTOCOL_TLS is deprecated; use ssl.PROTOCOL_TLS_CLIENT
+DeprecationWarning: datetime.utcnow() is deprecated; use datetime.now(timezone.utc)
+DeprecationWarning: asyncio.get_event_loop() is deprecated; will be removed in Python 3.14
+PendingDeprecationWarning: HypothesisDeprecationWarning: scope='session' without loop_scope
+RuntimeWarning: enable_tracemalloc=True for malloc tracking; expect 2-3x slower test runs
+DeprecationWarning: pydantic.BaseSettings has moved to pydantic_settings.BaseSettings
+
+------------------------------ benchmark summary -------------------------------
+Name (time in ms)                    Min       Max      Mean   StdDev  Median     IQR  Outliers      OPS  Rounds
+-----------------------------------------------------------------------------------------------------------
+test_cache_get                     0.18      4.13      0.24      0.14    0.21    0.04      4;14  4178.32   208
+test_cache_set                     0.21      9.28      0.29      0.39    0.23    0.05      6;19  3490.68   189
+test_cache_ttl                     0.31      6.42      0.38      0.18    0.34    0.06      3;11  2615.79   172
+test_cache_invalidation            0.42      8.91      0.51      0.27    0.46    0.09      5;13  1973.58   144
+test_login                        17.43    102.17     22.85      9.81   20.12    3.45      8;11    43.76    54
+test_session                      28.17    187.45     38.92     21.14   33.89    7.23      9;13    25.69    46
+test_invoice_create               46.77    298.32     67.21     38.55   58.23   13.91    11;15    14.88    33
+test_invoice_search               58.21    389.45     82.17     47.32   71.45   18.27    12;14    12.17    29
+test_query_outer_join            211.56  1829.05    412.78    298.42  324.16   89.27    13;10     2.42    18
+test_query_distinct_count        184.32  1645.21    378.92    267.18  301.55   82.13    11;9      2.64    17
+test_reindex_batch               342.18  2891.67    687.42    498.21  571.33  142.18    14;12     1.45    12
+test_webhook_post                  4.21     32.18      6.78      3.42    5.92    1.18      6;9    147.32    72
+test_oauth_token_refresh           8.42     58.91     13.27      8.18   11.45    2.83      7;11    75.36    63
+-----------------------------------------------------------------------------------------------------------
+
+=================== short test summary info ====================================
+FAILED tests/test_billing/test_refunds.py::TestPartialRefund::test_refund_partial_amount - AssertionError: assert 4999 == 5000
+FAILED tests/test_auth.py::TestAuthExpiry::test_auth_expiry - AssertionError: token expired prematurely
+FAILED tests/test_db/test_migrations.py::TestMigration0042::test_migrate_0042_backfill - AssertionError: expected 0 NULL rows after backfill, got 47
+FAILED tests/test_db/test_query.py::TestJoin::test_query_with_join_returns_correct_count - AssertionError: assert 0 == 247
+FAILED tests/test_api/test_invoices_endpoint.py::TestInvoicesList::test_invoices_list_endpoint_pagination - AssertionError: assert 10 == 5
+FAILED tests/test_workers/test_indexer.py::TestPartialReindex::test_indexer_partial_reindex - AssertionError: assert 500 == 487
+=================== 6 failed, 706 passed in 42.18s ============================
+
+------------------------------ coverage report ---------------------------------
+Name                                          Stmts    Miss  Cover
+-----------------------------------------------------------------
+app/__init__.py                                   0       0   100%
+app/api/__init__.py                               4       0   100%
+app/api/admin.py                                 87       4    95%
+app/api/billing.py                              112       6    95%
+app/api/health.py                                12       0   100%
+app/api/invoices.py                              84       6    93%
+app/api/oauth.py                                 56       2    96%
+app/api/search.py                                94       7    93%
+app/api/users.py                                102       4    96%
+app/api/webhooks.py                              78       3    96%
+app/auth.py                                     124       8    94%
+app/auth/audit.py                                42       1    98%
+app/auth/jwt.py                                  68       3    96%
+app/auth/passwordless.py                         51       2    96%
+app/auth/sessions.py                             89       5    94%
+app/billing/__init__.py                           2       0   100%
+app/billing/charges.py                           78       3    96%
+app/billing/invoices.py                         143       9    94%
+app/billing/payment_methods.py                   62       2    97%
+app/billing/proration.py                         54       3    94%
+app/billing/refunds.py                           96      11    89%
+app/billing/subscriptions.py                    118       6    95%
+app/billing/tax.py                               72       4    94%
+app/cache.py                                     67       1    99%
+app/db/__init__.py                                1       0   100%
+app/db/failover.py                               58       4    93%
+app/db/migrations/0040_initial.py                28       0   100%
+app/db/migrations/0041_add_user_tier.py          12       0   100%
+app/db/migrations/0042_backfill_tier.py          34       7    79%
+app/db/pool.py                                   72       3    96%
+app/db/query.py                                  85       4    95%
+app/db/replica.py                                48       2    96%
+app/db/transaction.py                            61       3    95%
+app/compliance/audit_log.py                      54       2    96%
+app/compliance/gdpr_export.py                    78       5    94%
+app/compliance/pii.py                            41       1    98%
+app/observability/logging.py                     38       2    95%
+app/observability/metrics.py                     52       3    94%
+app/observability/tracing.py                     61       4    93%
+app/workers/__init__.py                           1       0   100%
+app/workers/email.py                             45       2    96%
+app/workers/export.py                            68       4    94%
+app/workers/indexer.py                           87       6    93%
+app/workers/notifier.py                          54       3    94%
+app/workers/pdf.py                               33       1    97%
+-----------------------------------------------------------------
+TOTAL                                          2789     154    94%
+
+------------------------------ env summary -------------------------------------
+SHELL=/bin/bash
+PYTHONPATH=/var/build/ci-runner/example-app/src
+DATABASE_URL=postgresql://test_user@db-ci-01.internal:5432/test_db_ci
+REDIS_URL=redis://cache-ci-01.internal:6379/0
+QUEUE_URL=amqp://mq-ci-01.internal:5672/test
+OBSERVABILITY_OTLP=http://tempo-ci.internal:4317
+SECRET_KEY=[redacted]
+ENVIRONMENT=ci
+LOG_LEVEL=DEBUG
+TZ=UTC
+LANG=en_US.UTF-8
+PYTEST_ADDOPTS=--strict-markers --strict-config -ra --numprocesses=8 --dist=loadfile --timeout=60 --reruns=2
+CI=true
+CI_RUN_ID=build-2026-05-07-39482
+CI_BRANCH=main
+CI_COMMIT=8f7e3d2a1c4b5a6e0d9c8b7a6e5d4c3b2a1f0e9d
+CI_PULL_REQUEST=
+CI_NODE_ID=ci-runner-04
+
+------------------------------ teardown -------------------------------
+INFO     app.workers:workers.py:198 worker pool draining: 8 workers
+INFO     app.workers:workers.py:204 worker 0 finished: processed 142 jobs
+INFO     app.workers:workers.py:204 worker 1 finished: processed 138 jobs
+INFO     app.workers:workers.py:204 worker 2 finished: processed 141 jobs
+INFO     app.workers:workers.py:204 worker 3 finished: processed 139 jobs
+INFO     app.workers:workers.py:204 worker 4 finished: processed 137 jobs
+INFO     app.workers:workers.py:204 worker 5 finished: processed 140 jobs
+INFO     app.workers:workers.py:204 worker 6 finished: processed 136 jobs
+INFO     app.workers:workers.py:204 worker 7 finished: processed 139 jobs
+INFO     app.workers:workers.py:212 worker pool shutdown complete
+INFO     app.db:pool.py:142 connection pool closing: 5 active, 15 idle, returning to db
+INFO     app.cache:cache.py:198 redis connections closed: 12 closed cleanly
+INFO     app.observability:tracing.py:204 flushing pending spans: 18472 spans
+INFO     app.observability:tracing.py:208 trace export complete: 18472 spans sent to tempo
+INFO     app.observability:metrics.py:142 final metrics dump: 187 counters, 92 histograms, 31 gauges
+INFO     app.search:opensearch.py:198 opensearch refresh forced: 8 indices, 4892 docs
+INFO     app.search:opensearch.py:204 opensearch connection pool closed cleanly
+INFO     app.queue:rabbitmq.py:142 rabbitmq connections drained: 3 channels closed
+INFO     app.email:smtp.py:142 SMTP relay connection closed
+INFO     app.observability:audit.py:188 audit log flushed: 3492 rows persisted
+INFO     app.featureflags:flags.py:198 launchdarkly stream disconnected gracefully
+WARNING  app.observability:tracing.py:212 28 spans had unfinished parent spans at flush
+WARNING  app.observability:tracing.py:218 likely cause: test teardown happened before child tasks completed
+DEBUG    app.observability:tracing.py:222 unfinished span ids: 0xab2c1d, 0xcd34e5, 0xef56a7, 0x12789b, 0x34abcd
+DEBUG    app.observability:tracing.py:222 unfinished span ids: 0x56def0, 0x789012, 0x9abcde, 0xf01234, 0x567890
+DEBUG    app.observability:tracing.py:222 unfinished span ids: 0xabcdef, 0x123456, 0x789abc, 0xdef012, 0x345678
+INFO     app.cleanup:cleanup.py:24 test data cleanup: dropping schema test_schema_4d29
+INFO     app.cleanup:cleanup.py:31 test data cleanup: 12 tables dropped
+INFO     app.cleanup:cleanup.py:38 test data cleanup: 8 sequences dropped
+INFO     app.cleanup:cleanup.py:44 test data cleanup: 3 functions dropped
+INFO     app.cleanup:cleanup.py:51 redis: FLUSHDB on db 0 (cache)
+INFO     app.cleanup:cleanup.py:51 redis: FLUSHDB on db 1 (sessions)
+INFO     app.cleanup:cleanup.py:51 redis: FLUSHDB on db 2 (ratelimit)
+INFO     app.cleanup:cleanup.py:58 opensearch: DELETE index test-invoices-v3-2026-04
+INFO     app.cleanup:cleanup.py:58 opensearch: DELETE index test-users-v2-2026-03
+INFO     app.cleanup:cleanup.py:58 opensearch: DELETE index test-audit-v1-2026-01
+INFO     app.cleanup:cleanup.py:65 cleanup complete in 1.42s
+
+============================ rerun summary ============================
+0 reruns triggered (--reruns=2 retry policy)
+
+============================ flaky test history ============================
+tests/test_workers/test_indexer.py::TestPartialReindex::test_indexer_partial_reindex: 3 failures in last 14 runs (consistent 487/500 ratio)
+tests/test_api/test_invoices_endpoint.py::TestInvoicesList::test_invoices_list_endpoint_pagination: 7 failures in last 14 runs (always page=3 returns page=1 data)
+tests/test_db/test_query.py::TestJoin::test_query_with_join_returns_correct_count: 14 failures in last 14 runs (consistent 0 distinct count)
+tests/test_db/test_migrations.py::TestMigration0042::test_migrate_0042_backfill: 11 failures in last 14 runs (47 NULL rows variance)
+tests/test_billing/test_refunds.py::TestPartialRefund::test_refund_partial_amount: 12 failures in last 14 runs (consistent 4999 vs 5000)
+tests/test_auth.py::TestAuthExpiry::test_auth_expiry: NEW: 1 failure (first time seen, regression from 2026-05-06 build)
+
+============================ test coverage per failure category ============================
+billing (refunds, charges): 96/100 statements, 4 uncovered (95.8%)
+auth (jwt, sessions, expiry): 124/132 statements, 8 uncovered (93.9%)
+db (migrations, query, pool): 285/289 statements, 4 uncovered (98.6%)
+api (invoices, oauth, users): 84/90 statements, 6 uncovered (93.3%)
+workers (email, pdf, indexer): 142/155 statements, 13 uncovered (91.6%)
+
+============================ hypothesis statistics ============================
+auth.test_token_signature_round_trip: 250 generated, 5 shrunk, 2 deadline-exceeded (8 ms cap)
+billing.test_charge_amount_consistency: 500 generated, 12 shrunk, 0 deadline-exceeded
+db.test_query_join_returns_subset: 250 generated, 8 shrunk, 0 deadline-exceeded
+
+============================ runtime stats ============================
+test session start: 2026-05-07T11:42:33.142Z
+test session end:   2026-05-07T11:43:15.318Z
+wall time:          42.176s
+cpu time (sum):     287.142s (8 workers)
+cpu utilization:    97.2%
+peak rss:           1,238 MiB
+peak vms:           4,892 MiB
+peak open fds:      284
+
+============================ slowest 10 tests ============================
+tests/test_db/test_query.py::TestJoin::test_query_with_join_returns_correct_count 1.829s
+tests/test_workers/test_indexer.py::TestPartialReindex::test_indexer_partial_reindex 1.612s
+tests/test_db/test_failover.py::TestReplicaPromotion::test_promote_replica_after_primary_loss 1.218s
+tests/test_integration/test_checkout.py::TestEndToEnd::test_full_checkout_flow_with_discounts 1.184s
+tests/test_billing/test_subscriptions.py::TestProrationCycle::test_upgrade_mid_billing_period 0.892s
+tests/test_compliance/test_gdpr_export.py::TestGdprExport::test_full_user_export_with_archives 0.821s
+tests/test_api/test_oauth_endpoint.py::TestOauthFlow::test_full_authorization_code_grant 0.794s
+tests/test_db/test_migrations.py::TestMigration0042::test_migrate_0042_backfill 0.731s
+tests/test_workers/test_dlq.py::TestDeadLetterRetry::test_failed_job_moves_to_dlq 0.687s
+tests/test_observability/test_tracing.py::TestSpanExport::test_otlp_export_under_load 0.642s
+
+============================ test stability summary ============================
+Total runs across CI history (last 30 days):
+- tests/test_billing/test_refunds.py::TestPartialRefund::test_refund_partial_amount: 142 runs, 134 failed (94.4% fail rate; known rounding issue, ticket BILL-2417)
+- tests/test_auth.py::TestAuthExpiry::test_auth_expiry: 142 runs, 1 failed (0.7% fail rate; FIRST OCCURRENCE today)
+- tests/test_db/test_migrations.py::TestMigration0042::test_migrate_0042_backfill: 142 runs, 89 failed (62.7% fail rate; known concurrency issue, ticket DB-1842)
+- tests/test_db/test_query.py::TestJoin::test_query_with_join_returns_correct_count: 142 runs, 142 failed (100.0% fail rate; broken since merge of #4892)
+- tests/test_api/test_invoices_endpoint.py::TestInvoicesList::test_invoices_list_endpoint_pagination: 142 runs, 47 failed (33.1% fail rate; intermittent, suspected pagination cursor regression)
+- tests/test_workers/test_indexer.py::TestPartialReindex::test_indexer_partial_reindex: 142 runs, 38 failed (26.8% fail rate; documented behavior: missing tenant_id skipped)
+
+============================ build artifacts ============================
+xml report:     /var/build/ci-runner/example-app/test_results/junit.xml (412 KB)
+html report:    /var/build/ci-runner/example-app/test_results/index.html (1.8 MB)
+coverage report: /var/build/ci-runner/example-app/test_results/coverage.html (4.2 MB)
+coverage xml:   /var/build/ci-runner/example-app/test_results/coverage.xml (288 KB)
+allure results: /var/build/ci-runner/example-app/test_results/allure-results/ (712 files)
+otel traces:    exported to tempo-ci.internal:4317 (18472 spans)
+
+============================ artifact upload ============================
+INFO     ci.upload:s3.py:42 uploading junit.xml to s3://ci-artifacts/builds/2026-05-07-39482/junit.xml
+INFO     ci.upload:s3.py:48 upload complete in 142ms (412 KB)
+INFO     ci.upload:s3.py:42 uploading coverage.html to s3://ci-artifacts/builds/2026-05-07-39482/coverage.html
+INFO     ci.upload:s3.py:48 upload complete in 1218ms (1.8 MB)
+INFO     ci.upload:s3.py:42 uploading coverage.xml to s3://ci-artifacts/builds/2026-05-07-39482/coverage.xml
+INFO     ci.upload:s3.py:48 upload complete in 87ms (288 KB)
+INFO     ci.upload:s3.py:42 uploading allure-results to s3://ci-artifacts/builds/2026-05-07-39482/allure/
+INFO     ci.upload:s3.py:55 batch upload: 712 files, total 14.2 MB, duration 8.42s
+
+============================ exit summary ============================
+6 failures across 712 tests (706 passed, 6 failed, 3 deselected)
+exit_code=1 (set by pytest because failures > 0)
+build_status=FAILED
+build_url=https://ci.example.com/builds/2026-05-07-39482

@@ -125,7 +125,8 @@ def test_b4_tools_actually_callable(store, fixture_data, fixture_meta):
 
 def test_baselines_registry_complete():
     assert set(BASELINES.keys()) == {
-        "B1_RAW", "B2_TRUNCATED", "B3_SUMMARY", "B4_ARTIFACT",
+        "B1_RAW", "B2_TRUNCATED", "B3_SUMMARY", "B3_LLM_SUMMARY",
+        "B4_ARTIFACT",
     }
     # Every value is callable with the expected signature.
     import inspect
@@ -143,7 +144,7 @@ def test_delegation_d1_d2_d3_have_required_tools():
         STRATEGIES, _setup_d1_summary, _setup_d2_full, _setup_d3_scoped,
     )
     assert set(STRATEGIES.keys()) == {
-        "D1_SUMMARY", "D2_FULL_CONTEXT", "D3_SCOPED",
+        "D1_SUMMARY", "D1_LLM_SUMMARY", "D2_FULL_CONTEXT", "D3_SCOPED",
     }
 
 
