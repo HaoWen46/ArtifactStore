@@ -51,78 +51,75 @@
 
 = Abstract
 
-Modern tool-using AI agents produce large intermediate outputs — pytest logs,
-ripgrep results, browser snapshots, API JSON, subagent research traces — that
-are typically dumped into the conversation transcript, truncated, summarized,
-or hidden behind a worker-agent's summary. All four strategies are flawed:
-raw dumping wastes tokens, truncation loses evidence, summary-only delegation
+Modern tool-using AI agents produce large intermediate outputs — pytest
+logs, ripgrep results, browser snapshots, API JSON, subagent research
+traces — typically dumped into the transcript, truncated, summarized, or
+hidden behind a worker agent's summary. All four strategies are flawed:
+raw dumping wastes tokens, truncation loses evidence, summarization
 hallucinates, and worker isolation makes exact intermediate evidence
-unrecoverable.
+unrecoverable to the parent.
 
 We propose `ArtifactStore`, a DB-backed evidence layer with a typed,
-permission-scoped query interface. Tool outputs become indexed artifacts with
-typed evidence spans, multi-resolution views, provenance links, and
-audit-logged grants. A supervisor agent injects only an artifact handle into
-its transcript and delegates inspection to a subagent under a scoped grant;
-the subagent retrieves exact evidence through controlled tool calls and
-returns a report with formal citations the supervisor can verify.
+permission-scoped query interface. Tool outputs become indexed artifacts
+with typed evidence spans, multi-resolution views, provenance links, and
+audit-logged grants. A supervisor agent sees only an artifact handle;
+inspection is delegated to a subagent under a scoped grant that retrieves
+exact evidence through controlled tool calls and returns a report whose
+citations the supervisor can verify by replaying them through the store.
 
-*Novelty positioning*: agent-memory systems like *MemGPT* / *Letta* and
-*LangGraph checkpointers* persist intermediate state across turns but expose
-it as freeform text with no typed span, no citation primitive, and no
-per-read access surface. Capability-based access control (Dennis & Van Horn,
-1966; *seL4*, *Capsicum*) and row-level security (Postgres RLS, Oracle VPD)
-are mature in OS and DBMS contexts but are not applied to agent tool
-outputs. The contribution is not any one of these layers but the
-recombination — typed evidence spans, capability-scoped reads, span-level
-citations, and append-only audit logs in a single substrate sized for an
-agent-harness use case, where the runtime (not the LLM) is the policy
-enforcer.
+The contribution is the recombination — typed evidence spans,
+capability-scoped reads, span-level citations, and append-only audit
+logs — assembled into a single substrate sized for an agent harness,
+where the runtime (not the LLM) is the policy enforcer. Agent-memory
+systems (MemGPT / Letta, LangGraph checkpointers) persist intermediate
+state across turns but expose it as freeform text with no typed span, no
+citation primitive, and no per-read access surface; capability access
+control (seL4, Capsicum) and row-level security (Postgres RLS, Oracle
+VPD) are mature in OS and DBMS contexts but are not applied to agent
+tool outputs.
 
-*Scope of the empirical claims*: live evaluation is 147 runs against one
-provider class (DeepSeek V4 Pro through the Anthropic-compatible Messages
-endpoint) on six captured fixtures spanning 407–33,571 raw tokens, 3 reps
-per (fixture × baseline) cell at `temperature=1.0`. The two largest
-fixtures (9.6 K, 33 K) have n=3 per cell with wide Wilson 95% CIs (e.g.,
-`[0.21, 0.94]` for 2/3); structural claims (only B4/D3 produce
-verifiable citations and audit-log signal) hold by construction, not by
-reps. The 33 K fixture was added specifically to test the projected
-B1/B4 cost-crossover regime; results are reported in §8.4. We have not
-run a second model class (e.g., Anthropic Sonnet 4.5), flagged as the
-main remaining limitation.
+*Three empirical claims, supported by 360 paired runs across two model
+families* (DeepSeek V4 Pro and Qwen3.6-plus via their respective
+Anthropic-Messages-API-compatible endpoints; n=5 per (fixture × baseline
+× model × temperature) cell at `temperature` in `{0.0, 1.0}` on three diagnostic
+fixtures: pytest_auth_expiry, pytest_large_run, git_diff_auth_refactor):
 
-Headline results within those bounds: §11.1 single-agent (6 fixtures × 5
-baselines × 3 reps = 90 runs) shows B4 (ArtifactStore) reaches 13/18
-(72%, Wilson 95% CI [0.49, 0.88]) task success and 0.77 avg evidence
-recall across the suite; B1 (raw injection) reaches 17/18 (94%, CI
-[0.74, 0.99]) — *McNemar's exact test (p=0.125, 18 pairs) cannot
-separate B1 and B4 at this n, with all discordant pairs favoring B1
-on the two largest fixtures*. The robust empirical claim is that the
-summary baselines (B2/B3/B3') collapse to ≤47% suite-wide success and
-to 0–33% on the two fixtures ≥3.5 K raw tokens, while B1 and B4 hold.
-§11.2 supervisor↔subagent (5 fixtures × 4 strategies × 3 reps = 60 runs)
-shows D3 (scoped ArtifactStore delegation) holds parent context
-bounded at ~6 K tokens even on the 9.6 K fixture (D2 balloons to ~25 K
-in fresh runs — confirmed within ±3% of the prior draft's number).
-§11.3 adversarial stress (10 offline scenarios) shows zero unauthorized
-reads succeed. A real LLM-summary baseline B3'/D1' was added at
-reviewer request and does *not* beat deterministic B3/D1 on
-evidence-recall at this prototype's summarizer budget — but the
-*structural* advantages of B4/D3 (citation verifiability, audit-log
-signal, span-aware selective redaction) survive any summary quality
-and are the load-bearing claim of this report.
+#enum(
+  numbering: "C1.",
+  [*Across both model families*, B4 (ArtifactStore) achieves the highest
+   task success rate of any baseline: 0.93 / 1.00 / 0.73 / 0.73 (DeepSeek
+   t=1 / DeepSeek t=0 / Qwen t=1 / Qwen t=0). The strongest summary
+   baseline tested (B3", a 2-stage map-reduce LLM summarizer) reaches at
+   most 0.67; deterministic and single-pass LLM summarizers collapse to
+   0.33-0.47. At `temperature=0` on DeepSeek, B4 lands the correct
+   diagnosis on all 15 runs (Wilson 95% CI [0.80, 1.00]).],
 
-Implementation: ~2.0 kLOC of Python on SQLite + FTS5, plus a ~150 LOC
-client-side tool-use loop. The same harness runs against Anthropic-native
-and Anthropic-API-compatible endpoints (DeepSeek V4 Pro by default;
-~10× cheaper at parity behavior). 171 tests pass — unit, integration,
-offline e2e, CLI integration (subprocess and in-process), adversarial
-stress, eval-baseline unit tests, FTS5-fallback robustness, and
-review-driven regression tests for self-review-discovered weaknesses
-(long-line truncation, sensitivity self-labeling bypass, fence-post
-budget enforcement, citation case-handling). A target-leak control
-sweep confirms the eval's headline numbers are robust to whether the
-agent is told which failure to focus on.
+  [*Structural primitives — citation verifiability, scoped grants,
+   append-only audit signal — are unique to the artifact path*. No
+   summarization baseline, however strong, can resolve a citation back
+   to a verifiable evidence span or emit a per-read audit row. The
+   structural advantage holds by construction, independent of any
+   downstream summary quality.],
+
+  [*Structured access narrows model-quality gaps*. On the small
+   fixtures, B4 closes the recall gap between Qwen3.6 and DeepSeek
+   (B1_RAW: 0.84 vs 1.00 on pytest_auth_expiry → B4: 1.00 vs 0.96).
+   The structured-access advantage matters more on weaker models, not
+   less.],
+)
+
+*Honest caveats, not caveat walls*: on the multi-failure
+`pytest_large_run` fixture, Qwen3.6 B4 achieves only 0.20 task success
+across both temperatures — a real model-quality finding (agentic
+navigation under Qwen's thinking mode picks the wrong failure among
+five), not sampling noise. B4 also pays more input tokens than the
+best non-B4 baseline; on DeepSeek the prompt-cache covers most of this
+(\$0.004/run measured), on Qwen with no cache support B4 costs
+\$0.012-\$0.016/run.
+
+Implementation: ~2.0 kLOC of Python on SQLite + FTS5 with a ~150 LOC
+client-side tool-use loop. Provider-portable through the same harness;
+187 tests pass.
 
 = Motivation and Thesis
 
