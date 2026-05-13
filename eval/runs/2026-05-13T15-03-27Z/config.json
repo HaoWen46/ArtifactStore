@@ -1,0 +1,30 @@
+{
+  "started_at": "2026-05-13T15:03:27.111735+00:00",
+  "model": "qwen3.6-plus",
+  "provider": "Qwen (Alibaba Model Studio)",
+  "base_url": "https://dashscope-intl.aliyuncs.com/apps/anthropic",
+  "key_env": "QWEN_API_KEY",
+  "git_rev": "0a1f9340e2dfa707d8321cbb39bd32c2130b15e7",
+  "fixtures": [
+    "pytest_xxl_run"
+  ],
+  "baselines": [
+    "B1_RAW",
+    "B2_TRUNCATED",
+    "B3_SUMMARY",
+    "B3_LLM_SUMMARY",
+    "B4_ARTIFACT"
+  ],
+  "reps": 3,
+  "max_turns": 10,
+  "temperature": 0.0,
+  "fixture_registry": {
+    "pytest_xxl_run": {
+      "kind": "pytest",
+      "target": "auth_expiry",
+      "artifact_type": "pytest_failure",
+      "ext": ".log",
+      "reveal_target": false
+    }
+  }
+}

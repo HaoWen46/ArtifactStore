@@ -1,0 +1,11 @@
+run_id,access_id,grant_id,subject_agent_id,artifact_id,operation,view,timestamp,result_token_count,allowed,denial_reason
+pytest_xxl_run__B4_ARTIFACT__rep0,acc_fe556801,grant_eaf3c5a3,eval_agent,art_a116e1cc,get_spans,,2026-05-13T15:10:24.873386+00:00,855,1,
+pytest_xxl_run__B4_ARTIFACT__rep0,acc_1e67a435,grant_eaf3c5a3,eval_agent,art_a116e1cc,expand_view,preview,2026-05-13T15:10:46.197060+00:00,238,1,
+pytest_xxl_run__B4_ARTIFACT__rep0,acc_4acf4f3b,grant_eaf3c5a3,eval_agent,art_a116e1cc,expand_view,evidence,2026-05-13T15:10:50.758814+00:00,1774,1,
+pytest_xxl_run__B4_ARTIFACT__rep0,acc_0aae6164,grant_eaf3c5a3,eval_agent,art_a116e1cc,get_spans,,2026-05-13T15:11:30.616002+00:00,855,1,
+pytest_xxl_run__B4_ARTIFACT__rep1,acc_a79405e7,grant_e114b1b0,eval_agent,art_e571b9c3,get_spans,,2026-05-13T15:11:59.184950+00:00,855,1,
+pytest_xxl_run__B4_ARTIFACT__rep1,acc_28769a0a,grant_e114b1b0,eval_agent,art_e571b9c3,get_spans,,2026-05-13T15:12:24.685847+00:00,855,1,
+pytest_xxl_run__B4_ARTIFACT__rep1,acc_4b540398,grant_e114b1b0,eval_agent,art_e571b9c3,expand_view,evidence,2026-05-13T15:12:51.489763+00:00,1774,1,
+pytest_xxl_run__B4_ARTIFACT__rep2,acc_232bd68a,grant_f7ae77cf,eval_agent,art_6fbcad3d,get_spans,,2026-05-13T15:13:25.689290+00:00,855,1,
+pytest_xxl_run__B4_ARTIFACT__rep2,acc_a7b26dfa,grant_f7ae77cf,eval_agent,art_6fbcad3d,expand_view,preview,2026-05-13T15:13:25.690447+00:00,238,1,
+pytest_xxl_run__B4_ARTIFACT__rep2,acc_2da23cfe,grant_f7ae77cf,eval_agent,art_6fbcad3d,expand_view,evidence,2026-05-13T15:13:49.861881+00:00,1527,1,
