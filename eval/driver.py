@@ -104,6 +104,14 @@ FIXTURE_REGISTRY: dict[str, dict] = {
                                 "artifact_type": "pytest_failure",
                                 "ext": ".log",
                                 "reveal_target": False},
+    # ~110K-token XXL CI log with 8 failures (CRITIQUE §92.6).
+    # Same auth_expiry timezone bug as pytest_xl_run, but buried in ~80K
+    # tokens of pure HTTP-access-log noise plus three extended progress
+    # blocks. Tests whether B4's input plateau holds at >>30K raw tokens.
+    "pytest_xxl_run":         {"kind": "pytest", "target": "auth_expiry",
+                                "artifact_type": "pytest_failure",
+                                "ext": ".log",
+                                "reveal_target": False},
     "rg_grep_noise":          {"kind": "grep",   "target": "todos",
                                 "artifact_type": "grep_result",
                                 "ext": ".txt",
