@@ -1,0 +1,71 @@
+{
+  "started_at": "2026-05-13T11:08:47.351931+00:00",
+  "finished_at": "2026-05-13T12:14:50.320954+00:00",
+  "elapsed_seconds": 3962.969023,
+  "total_runs": 90,
+  "successful": 45,
+  "failed": 45,
+  "exceptions": 0,
+  "total_input_tokens_uncached": 219721,
+  "total_input_tokens_cache_read": 0,
+  "total_input_tokens_cache_creation": 0,
+  "total_input_tokens_all": 219721,
+  "total_output_tokens": 174470,
+  "total_estimated_cost_usd": 0.6837736,
+  "by_baseline": {
+    "B1_RAW": {
+      "runs": 15,
+      "avg_input_tokens_uncached": 1752.6666666666667,
+      "avg_total_input_tokens": 1752.6666666666667,
+      "avg_output_tokens": 2249.2,
+      "avg_evidence_recall": 0.6933333333333334,
+      "task_success_rate": 0.6666666666666666,
+      "avg_estimated_cost_usd": 0.006800213333333333
+    },
+    "B2_TRUNCATED": {
+      "runs": 15,
+      "avg_input_tokens_uncached": 352.6666666666667,
+      "avg_total_input_tokens": 352.6666666666667,
+      "avg_output_tokens": 1851.4666666666667,
+      "avg_evidence_recall": 0.26666666666666666,
+      "task_success_rate": 0.3333333333333333,
+      "avg_estimated_cost_usd": 0.004725653333333333
+    },
+    "B3_SUMMARY": {
+      "runs": 15,
+      "avg_input_tokens_uncached": 299.3333333333333,
+      "avg_total_input_tokens": 299.3333333333333,
+      "avg_output_tokens": 2094.9333333333334,
+      "avg_evidence_recall": 0.38666666666666666,
+      "task_success_rate": 0.3333333333333333,
+      "avg_estimated_cost_usd": 0.0052673066666666666
+    },
+    "B3_LLM_SUMMARY": {
+      "runs": 15,
+      "avg_input_tokens_uncached": 340.26666666666665,
+      "avg_total_input_tokens": 340.26666666666665,
+      "avg_output_tokens": 1815.4666666666667,
+      "avg_evidence_recall": 0.4666666666666667,
+      "task_success_rate": 0.4,
+      "avg_estimated_cost_usd": 0.007191199999999999
+    },
+    "B3_LLM_MULTIPASS": {
+      "runs": 15,
+      "avg_input_tokens_uncached": 328.8,
+      "avg_total_input_tokens": 328.8,
+      "avg_output_tokens": 2054.9333333333334,
+      "avg_evidence_recall": 0.5733333333333334,
+      "task_success_rate": 0.5333333333333333,
+      "avg_estimated_cost_usd": 0.008584266666666666
+    },
+    "B4_ARTIFACT": {
+      "runs": 15,
+      "avg_input_tokens_uncached": 11574.333333333334,
+      "avg_total_input_tokens": 11574.333333333334,
+      "avg_output_tokens": 1565.3333333333333,
+      "avg_evidence_recall": 0.7866666666666667,
+      "task_success_rate": 0.7333333333333333,
+      "avg_estimated_cost_usd": 0.013016266666666667
+    }
+  }
+}
