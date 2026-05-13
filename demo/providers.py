@@ -9,9 +9,11 @@ Picking by *model-name prefix* keeps the call sites trivial: pass
 and you get Qwen; pass `--model claude-sonnet-4-5` and you get native
 Anthropic. No global flag, no .env swap, no manual base_url juggling.
 
-Each provider has its own env vars; legacy `ANTHROPIC_API_KEY` /
-`ANTHROPIC_BASE_URL` remain a final fallback so existing setups keep
-working unchanged.
+Each provider has its own env vars. There is no cross-provider
+fallback for either keys or URLs — that would silently authenticate
+a request with the wrong credentials and only surface as a confusing
+401 at the API call. A missing key raises `ProviderError` up-front;
+a missing URL falls through to the provider's hard-coded default.
 """
 from __future__ import annotations
 
@@ -21,9 +23,9 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Provider:
-    """One provider's wiring. `key_env` is the preferred env var name; if
-    it is unset we fall back to ANTHROPIC_API_KEY. `default_base_url`
-    can be overridden by `base_url_env` if the user needs to point at a
+    """One provider's wiring. `key_env` is the env var the resolver
+    reads — no cross-provider fallback. `default_base_url` can be
+    overridden by `base_url_env` if the user needs to point at a
     self-hosted or alternate-region endpoint."""
     name: str
     key_env: str
@@ -102,13 +104,17 @@ def resolve(model: str) -> tuple[str, str | None, Provider]:
     provider_key = _detect(model)
     p = PROVIDERS[provider_key]
 
-    api_key = os.environ.get(p.key_env) or os.environ.get("ANTHROPIC_API_KEY")
+    # Provider-specific key, full stop. No ANTHROPIC_API_KEY fallback —
+    # that would silently authenticate a Qwen / DeepSeek request with
+    # the wrong key and only surface as a confusing 401 at the actual
+    # API call. Symmetric with the base-URL behaviour.
+    api_key = os.environ.get(p.key_env)
     if not api_key:
-        hint = f"Set {p.key_env}=... in .env"
-        if p.key_env != "ANTHROPIC_API_KEY":
-            hint += " (or ANTHROPIC_API_KEY as a fallback)"
         raise ProviderError(
-            f"No API key found for provider {p.name!r} (model={model!r}). {hint}."
+            f"No API key found for provider {p.name!r} (model={model!r}). "
+            f"Set {p.key_env}=... in .env. (Each provider uses its own "
+            f"env var so a sweep can run multiple model families without "
+            f"silently misrouting credentials.)"
         )
 
     # Base-URL lookup order:
@@ -129,7 +135,7 @@ def describe(model: str) -> dict[str, object]:
     output. Never raises — masks the key and reports 'MISSING' if absent."""
     provider_key = _detect(model)
     p = PROVIDERS[provider_key]
-    raw_key = os.environ.get(p.key_env) or os.environ.get("ANTHROPIC_API_KEY")
+    raw_key = os.environ.get(p.key_env)
     base_url = os.environ.get(p.base_url_env) or p.default_base_url
     return {
         "model": model,

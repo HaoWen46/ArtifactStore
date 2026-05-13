@@ -75,16 +75,18 @@ def test_missing_file_is_noop(tmp_path: Path):
     assert set_keys == {}
 
 
-def test_anthropic_pair_propagates_to_agent(tmp_path: Path, monkeypatch):
-    """End-to-end: a .env containing the Anthropic-key pair gets loaded by the
-    runner helper, and a freshly constructed Agent picks up base_url. No
-    network calls — just verify the SDK client carries the configured URL.
-    """
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+def test_deepseek_pair_propagates_to_agent(tmp_path: Path, monkeypatch):
+    """End-to-end: a .env containing the DeepSeek key/URL pair gets loaded
+    by the runner helper, and a freshly constructed Agent (default model
+    deepseek-v4-pro) picks up the URL. No network calls — just verify the
+    SDK client carries the configured URL."""
+    for var in ("ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL",
+                "DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL",
+                "QWEN_API_KEY", "QWEN_BASE_URL"):
+        monkeypatch.delenv(var, raising=False)
     p = _write(tmp_path / ".env",
-               'ANTHROPIC_API_KEY="test-key-not-used"\n'
-               'ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic"\n')
+               'DEEPSEEK_API_KEY="test-key-not-used"\n'
+               'DEEPSEEK_BASE_URL="https://api.deepseek.com/anthropic"\n')
     load_dotenv(p)
 
     from demo.agent import Agent
@@ -94,11 +96,13 @@ def test_anthropic_pair_propagates_to_agent(tmp_path: Path, monkeypatch):
 
 def test_real_dotenv_has_required_keys_if_present():
     """If the user actually has a .env, sanity-check it before they bleed
-    money on a misconfigured run. We only assert keys exist; we never read
-    or print the values."""
+    money on a misconfigured run. At least one provider key must be set —
+    we only assert keys exist; we never read or print the values."""
     project_env = Path(__file__).parent.parent / ".env"
     if not project_env.is_file():
         pytest.skip("no project .env")
     content = project_env.read_text()
-    assert "ANTHROPIC_API_KEY=" in content, \
-        "project .env exists but has no ANTHROPIC_API_KEY"
+    assert any(f"{name}=" in content for name in
+               ("DEEPSEEK_API_KEY", "QWEN_API_KEY", "ANTHROPIC_API_KEY")), \
+        "project .env exists but has none of DEEPSEEK_API_KEY / " \
+        "QWEN_API_KEY / ANTHROPIC_API_KEY"

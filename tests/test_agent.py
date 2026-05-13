@@ -85,8 +85,10 @@ def test_anthropic_base_url_does_not_leak_across_providers(monkeypatch):
 def test_modelconfig_base_url_overrides_env(monkeypatch):
     """An explicit ModelConfig(base_url=...) wins over every env var."""
     _clear_env(monkeypatch)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-not-used")
-    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://elsewhere.example/")
+    # Default model is deepseek-v4-pro, so set the DeepSeek key (not
+    # ANTHROPIC_API_KEY — there is no cross-provider fallback).
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key-not-used")
+    monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://elsewhere.example/")
     a = Agent(name="x", system="", tools=[],
               config=ModelConfig(base_url=DEEPSEEK_BASE_URL))
     assert "deepseek.com" in str(a.client.base_url)
@@ -139,16 +141,29 @@ def test_claude_model_falls_back_to_sdk_default(monkeypatch):
     assert "dashscope" not in str(a.client.base_url)
 
 
-def test_anthropic_key_falls_back_for_deepseek_when_specific_key_missing(monkeypatch):
-    """Single-env-var legacy users with only ANTHROPIC_API_KEY set must
-    still be able to run a DeepSeek model. The resolver tries the
-    provider-specific key first, then ANTHROPIC_API_KEY as a fallback."""
+def test_anthropic_key_does_not_authenticate_other_providers(monkeypatch):
+    """Critical: a bare ANTHROPIC_API_KEY must not silently authenticate
+    a DeepSeek or Qwen request. The fallback is gone for the same
+    reason ANTHROPIC_BASE_URL does not leak across providers — silent
+    credential misrouting is worse than an up-front error. Legacy
+    single-env-var users must rename ANTHROPIC_API_KEY -> DEEPSEEK_API_KEY
+    in their .env (documented in .env.example)."""
     _clear_env(monkeypatch)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-not-used")
-    # No DEEPSEEK_API_KEY — must not raise.
-    a = Agent(name="x", system="", tools=[],
+    # No DEEPSEEK_API_KEY — must raise, not silently use ANTHROPIC_API_KEY.
+    with pytest.raises(RuntimeError, match="DEEPSEEK_API_KEY"):
+        Agent(name="x", system="", tools=[],
               config=ModelConfig(model="deepseek-v4-pro"))
-    assert "deepseek.com" in str(a.client.base_url)
+
+
+def test_qwen_key_required_for_qwen_models(monkeypatch):
+    """Symmetric: Qwen model with only DEEPSEEK_API_KEY set must error,
+    not silently send DeepSeek credentials to DashScope."""
+    _clear_env(monkeypatch)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key-not-used")
+    with pytest.raises(RuntimeError, match="QWEN_API_KEY"):
+        Agent(name="x", system="", tools=[],
+              config=ModelConfig(model="qwen3.6-max"))
 
 
 # ---------------------------------------------------------------------------
