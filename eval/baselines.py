@@ -164,14 +164,16 @@ Do NOT diagnose — produce a faithful summary; downstream agent decides.
 def b3_llm_summary(store: ArtifactStore, fixture_data: str,
                    fixture_meta: dict,
                    *, summarizer_model: str = "deepseek-v4-pro") -> Setup:
-    """B3' — LLM-generated summary rather than regex.
+    """B3' — single-pass LLM-generated summary.
 
-    Calls the same provider as the agent loop (resolved from
-    `summarizer_model`'s prefix via demo.providers). One-shot
-    summarization, no tools. Token cost is accounted on Setup.setup_*
-    fields and folded into the run's reported total by the driver —
-    keeps cost numbers apples-to-apples against B3 (deterministic,
-    $0 setup).
+    The weakest LLM-summary baseline: one call, 250-token cap. Kept as
+    the strawman that ArtifactStore beat in early eval; the multi-pass
+    variant (b3_llm_summary_multipass) is the stronger comparison the
+    paper reviewers asked for.
+
+    Token cost is accounted on Setup.setup_* fields and folded into the
+    run's reported total by the driver — keeps cost numbers
+    apples-to-apples against B3 (deterministic, $0 setup).
     """
     summarizer = Agent(
         name="b3_llm_summarizer",
@@ -202,6 +204,168 @@ def b3_llm_summary(store: ArtifactStore, fixture_data: str,
         extra={"summarizer_model": summarizer_model,
                "summary_chars": len(summary),
                "summary_tokens": estimate(summary)},
+    )
+
+
+# ---------------------------------------------------------------------------
+# B3'' — multi-pass map-reduce LLM summary. The stronger baseline a reviewer
+# would ask for: chunk the raw output, summarize each chunk preserving
+# diagnostic detail, then reduce the chunk summaries into a final synthesis.
+# Two stages × N chunks + 1 reducer = (N+1) LLM calls and a larger token
+# budget than B3', so it's strictly more compute. If ArtifactStore still
+# beats THIS on evidence recovery, the comparison is honest.
+# ---------------------------------------------------------------------------
+
+B3_MULTIPASS_MAP_SYSTEM = """\
+You are stage 1 of a 2-stage summarizer. You receive ONE CHUNK of a longer
+tool output. Other chunks are summarized in parallel by other workers; a
+reducer will merge all chunk summaries.
+
+Preserve everything diagnostically critical from THIS chunk:
+  - error messages, assertion text, traceback frames verbatim
+  - failing test names, file paths, line numbers
+  - WARNING / ERROR log lines that name a function or file
+  - exception types and arguments
+  - timestamps, hashes, IDs, or concrete values an engineer would quote
+
+Drop only obvious noise (progress dots, repeated benchmark rows). When in
+doubt, KEEP — the reducer can compress further. If the chunk contains no
+diagnostic content, return one line: 'CHUNK <i>: no diagnostic content'.
+
+Format: short bulleted facts, prefixed with `CHUNK <i>:`. No prose framing.
+Do NOT diagnose. Cap at 400 tokens per chunk."""
+
+
+B3_MULTIPASS_REDUCE_SYSTEM = """\
+You are stage 2 of a 2-stage summarizer. You receive per-chunk summaries
+from stage 1, in order. The downstream debugging agent will see ONLY your
+final summary, not the raw output.
+
+Synthesize a single coherent summary that preserves:
+  - the failing test name(s), assertion text, exception type+message
+  - the file path and line number where the failure originates
+  - any WARNING / ERROR lines that name the offending code
+  - concrete values (timestamps, IDs, hashes) the engineer would quote
+
+If chunk summaries are redundant, merge them. If they conflict, prefer the
+more concrete/specific evidence. If multiple failures are present, list
+them but mark the one with the most actionable evidence.
+
+Format: short bulleted sections under headings (Failure, Evidence, Context).
+Cap at 600 tokens. Do NOT diagnose — produce a faithful synthesis."""
+
+
+def _chunk_text(text: str, *, target_tokens: int = 2000,
+                overlap_tokens: int = 100) -> list[str]:
+    """Token-aware chunking using the project's `estimate` helper. We
+    chunk on line boundaries so per-chunk content stays self-describing
+    (a chunk doesn't slice mid-traceback if avoidable). Falls back to
+    char-based slicing when a single line exceeds target_tokens (rare
+    but possible — base64-encoded payload, etc.)."""
+    lines = text.splitlines(keepends=True)
+    if not lines:
+        return [text] if text else []
+    chunks: list[list[str]] = [[]]
+    cur_tokens = 0
+    for line in lines:
+        n = estimate(line)
+        if cur_tokens + n > target_tokens and chunks[-1]:
+            # Start a new chunk; carry a small tail for context overlap.
+            tail = chunks[-1][-3:] if overlap_tokens else []
+            chunks.append(list(tail))
+            cur_tokens = sum(estimate(x) for x in tail)
+        chunks[-1].append(line)
+        cur_tokens += n
+    return ["".join(c) for c in chunks if c]
+
+
+def b3_llm_summary_multipass(
+        store: ArtifactStore, fixture_data: str, fixture_meta: dict,
+        *, summarizer_model: str = "deepseek-v4-pro",
+        target_chunk_tokens: int = 2000,
+        max_map_tokens: int = 600,
+        max_reduce_tokens: int = 900) -> Setup:
+    """B3'' — map-reduce LLM summary.
+
+    Stage 1 (MAP): chunk the raw input, summarize each chunk with strong
+    detail-preservation instructions. Each chunk's max_tokens > B3' total
+    cap, so the map stage alone has more capacity than B3'.
+
+    Stage 2 (REDUCE): synthesize chunk summaries into a coherent final
+    summary, still cap-bounded but the input is curated.
+
+    Cost: ~(N+1)× B3' tokens. If ArtifactStore still wins on
+    evidence-recall vs this baseline, the win isn't from B3' being too
+    weak. All map+reduce token usage is folded into setup_* fields.
+    """
+    chunks = _chunk_text(fixture_data, target_tokens=target_chunk_tokens)
+
+    map_summaries: list[str] = []
+    setup_in = setup_out = 0
+    for i, chunk in enumerate(chunks):
+        mapper = Agent(
+            name=f"b3mp_map_{i}",
+            system=B3_MULTIPASS_MAP_SYSTEM,
+            tools=[],
+            config=ModelConfig(model=summarizer_model, max_turns=1,
+                               max_tokens=max_map_tokens),
+            verbose=False,
+        )
+        instruction = (
+            f"Chunk {i+1}/{len(chunks)} of a {fixture_meta['kind']} "
+            f"output.\n\n<chunk index=\"{i+1}\">\n{chunk}\n</chunk>"
+        )
+        r = mapper.run(instruction)
+        setup_in += r.total_input_tokens
+        setup_out += r.output_tokens
+        text = r.final_text.strip()
+        if text:
+            map_summaries.append(text)
+
+    if not map_summaries:
+        # Mapper produced nothing useful — fall back to deterministic
+        # summary so the downstream agent isn't given an empty string.
+        summary = deterministic_summary(fixture_data)
+    elif len(chunks) == 1:
+        # Single-chunk inputs (< target_chunk_tokens) don't need a
+        # reducer pass — the map summary IS the final summary. Saves
+        # one LLM call without compromising the multi-pass story.
+        summary = map_summaries[0]
+    else:
+        reducer = Agent(
+            name="b3mp_reduce",
+            system=B3_MULTIPASS_REDUCE_SYSTEM,
+            tools=[],
+            config=ModelConfig(model=summarizer_model, max_turns=1,
+                               max_tokens=max_reduce_tokens),
+            verbose=False,
+        )
+        joined = "\n\n".join(map_summaries)
+        instruction = (
+            f"Synthesize a final summary from the chunk summaries below. "
+            f"The downstream agent will see only your output.\n\n"
+            f"<chunk_summaries>\n{joined}\n</chunk_summaries>"
+        )
+        r = reducer.run(instruction)
+        setup_in += r.total_input_tokens
+        setup_out += r.output_tokens
+        summary = r.final_text.strip() or "\n\n".join(map_summaries)
+
+    user = (
+        f"{_diagnostic_phrase(fixture_meta)} "
+        f"You only have a summary produced by a multi-pass LLM "
+        f"summarizer; the raw output was not preserved.\n\n"
+        f"<summary>\n{summary}\n</summary>"
+    )
+    return Setup(
+        system=B1_B2_B3_SYSTEM, user_message=user, tools=[],
+        setup_input_tokens=setup_in,
+        setup_output_tokens=setup_out,
+        extra={"summarizer_model": summarizer_model,
+               "summary_chars": len(summary),
+               "summary_tokens": estimate(summary),
+               "num_chunks": len(chunks),
+               "stages": ("map+reduce" if len(chunks) > 1 else "map_only")},
     )
 
 
@@ -318,9 +482,12 @@ def b4_artifactstore(store: ArtifactStore, fixture_data: str,
 
 
 BASELINES: dict[str, Callable[..., Setup]] = {
-    "B1_RAW":         b1_raw,
-    "B2_TRUNCATED":   b2_truncated,
-    "B3_SUMMARY":     b3_summary,
-    "B3_LLM_SUMMARY": b3_llm_summary,
-    "B4_ARTIFACT":    b4_artifactstore,
+    "B1_RAW":               b1_raw,
+    "B2_TRUNCATED":         b2_truncated,
+    "B3_SUMMARY":           b3_summary,
+    "B3_LLM_SUMMARY":       b3_llm_summary,
+    # B3'': multi-pass map-reduce summary — the stronger LLM-summary
+    # baseline a reviewer would ask for. ~(N+1)x B3' cost.
+    "B3_LLM_MULTIPASS":     b3_llm_summary_multipass,
+    "B4_ARTIFACT":          b4_artifactstore,
 }

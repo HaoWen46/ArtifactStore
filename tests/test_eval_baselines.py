@@ -126,13 +126,166 @@ def test_b4_tools_actually_callable(store, fixture_data, fixture_meta):
 def test_baselines_registry_complete():
     assert set(BASELINES.keys()) == {
         "B1_RAW", "B2_TRUNCATED", "B3_SUMMARY", "B3_LLM_SUMMARY",
-        "B4_ARTIFACT",
+        "B3_LLM_MULTIPASS", "B4_ARTIFACT",
     }
     # Every value is callable with the expected signature.
     import inspect
     for name, fn in BASELINES.items():
         sig = inspect.signature(fn)
         assert "store" in sig.parameters or len(sig.parameters) >= 3, name
+
+
+# --- B3'' — multi-pass map-reduce summary ---------------------------------
+
+def test_chunk_text_respects_token_budget():
+    """_chunk_text should produce chunks under (target_tokens + line size)
+    each. Short inputs return a single chunk."""
+    from eval.baselines import _chunk_text
+    from artifactstore.tokens import estimate
+
+    short = "FAIL test_x\n  assert 1 == 2\n"
+    chunks = _chunk_text(short, target_tokens=2000)
+    assert len(chunks) == 1
+    assert chunks[0] == short
+
+    # Large input: many lines, each ~20 tokens, push past target.
+    big_lines = [f"WARNING auth.py:{i:03d} token rejected: now=1000 exp=900\n"
+                 for i in range(500)]
+    big = "".join(big_lines)
+    chunks = _chunk_text(big, target_tokens=500)
+    assert len(chunks) >= 2
+    for c in chunks:
+        # Generous slack — we chunk on line boundaries so the last line of
+        # a chunk can push past target. Just ensure no chunk is unbounded.
+        assert estimate(c) < 1500
+
+
+def test_b3_multipass_short_input_uses_map_only(store, fixture_data, fixture_meta):
+    """Single-chunk inputs skip the reducer pass — verifies the
+    map_only optimization (saves one LLM call when not needed)."""
+    from eval.baselines import b3_llm_summary_multipass
+
+    # Inject a scripted Agent class so we count calls without network.
+    import eval.baselines as bl
+
+    calls: list[str] = []
+
+    class FakeResult:
+        def __init__(self, text):
+            self.final_text = text
+            self.total_input_tokens = 10
+            self.output_tokens = 5
+
+    class FakeAgent:
+        def __init__(self, *, name, system, tools, config, verbose=False,
+                     **_):
+            self.name = name
+
+        def run(self, instruction):
+            calls.append(self.name)
+            return FakeResult(f"MAP_SUMMARY_FROM_{self.name}")
+
+    original = bl.Agent
+    bl.Agent = FakeAgent
+    try:
+        s = b3_llm_summary_multipass(
+            store, fixture_data, fixture_meta,
+            target_chunk_tokens=2000,
+        )
+    finally:
+        bl.Agent = original
+
+    # One mapper, zero reducers (single chunk).
+    assert sum(1 for c in calls if c.startswith("b3mp_map_")) == 1
+    assert sum(1 for c in calls if c.startswith("b3mp_reduce")) == 0
+    # The map output is the final summary.
+    assert "MAP_SUMMARY_FROM" in s.user_message
+    assert s.extra["num_chunks"] == 1
+    assert s.extra["stages"] == "map_only"
+    # Costs from the single mapper call propagate.
+    assert s.setup_input_tokens == 10
+    assert s.setup_output_tokens == 5
+
+
+def test_b3_multipass_large_input_uses_map_reduce(store, fixture_meta):
+    """Multi-chunk inputs invoke the reducer — verifies both stages run
+    and tokens accumulate across all calls."""
+    from eval.baselines import b3_llm_summary_multipass
+    import eval.baselines as bl
+
+    calls: list[tuple[str, str]] = []
+
+    class FakeResult:
+        def __init__(self, text, in_tok=10, out_tok=5):
+            self.final_text = text
+            self.total_input_tokens = in_tok
+            self.output_tokens = out_tok
+
+    class FakeAgent:
+        def __init__(self, *, name, system, tools, config, verbose=False,
+                     **_):
+            self.name = name
+
+        def run(self, instruction):
+            calls.append((self.name, instruction[:30]))
+            return FakeResult(f"SUMMARY_FROM_{self.name}")
+
+    big = "".join([f"WARNING line {i}: assertion failed\n" for i in range(500)])
+    original = bl.Agent
+    bl.Agent = FakeAgent
+    try:
+        s = b3_llm_summary_multipass(
+            store, big, fixture_meta,
+            target_chunk_tokens=300,
+        )
+    finally:
+        bl.Agent = original
+
+    n_map = sum(1 for c, _ in calls if c.startswith("b3mp_map_"))
+    n_reduce = sum(1 for c, _ in calls if c.startswith("b3mp_reduce"))
+    assert n_map >= 2, "expected multiple map chunks for a large input"
+    assert n_reduce == 1, "exactly one reduce pass over chunk summaries"
+    assert s.extra["num_chunks"] >= 2
+    assert s.extra["stages"] == "map+reduce"
+    assert "SUMMARY_FROM_b3mp_reduce" in s.user_message
+    # Token cost accumulates across all (N+1) calls.
+    assert s.setup_input_tokens == 10 * (n_map + n_reduce)
+    assert s.setup_output_tokens == 5 * (n_map + n_reduce)
+
+
+def test_b3_multipass_falls_back_when_mappers_produce_nothing(
+    store, fixture_data, fixture_meta,
+):
+    """If every mapper returns empty text (rare but possible — say the
+    model refuses), the baseline must NOT pass an empty summary to the
+    downstream agent. It falls back to the deterministic summary."""
+    from eval.baselines import b3_llm_summary_multipass
+    import eval.baselines as bl
+
+    class FakeResult:
+        def __init__(self):
+            self.final_text = ""
+            self.total_input_tokens = 5
+            self.output_tokens = 0
+
+    class FakeAgent:
+        def __init__(self, *, name, **_):
+            self.name = name
+
+        def run(self, instruction):
+            return FakeResult()
+
+    original = bl.Agent
+    bl.Agent = FakeAgent
+    try:
+        s = b3_llm_summary_multipass(store, fixture_data, fixture_meta)
+    finally:
+        bl.Agent = original
+
+    # The user message must still carry some summary content; the
+    # deterministic fallback at least includes the WARNING/FAIL lines.
+    assert "<summary>" in s.user_message
+    assert s.user_message.count("<summary>\n\n</summary>") == 0
 
 
 # --- delegation builders --------------------------------------------------
