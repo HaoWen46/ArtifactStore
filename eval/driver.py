@@ -189,7 +189,8 @@ def _capture_read_text(messages: list[dict]) -> str:
 
 def _run_one(*, fixture: str, baseline: str, rep: int, model: str,
              max_turns: int, run_dir: Path,
-             gold: dict, fixture_data: str, fixture_meta: dict) -> RunResult:
+             gold: dict, fixture_data: str, fixture_meta: dict,
+             temperature: float = 1.0) -> RunResult:
     run_id = f"{fixture}__{baseline}__rep{rep}"
     db_path = run_dir / f"db_{run_id}.sqlite"
     store = ArtifactStore.init(db_path)
@@ -199,7 +200,8 @@ def _run_one(*, fixture: str, baseline: str, rep: int, model: str,
         name=f"eval_{baseline}",
         system=setup.system,
         tools=setup.tools,
-        config=ModelConfig(model=model, max_turns=max_turns),
+        config=ModelConfig(model=model, max_turns=max_turns,
+                           temperature=temperature),
         verbose=False,
     )
     started = time.time()
@@ -313,6 +315,7 @@ def _load_fixture(name: str) -> tuple[str, dict, dict]:
 
 def run_eval(*, fixtures: list[str], baselines: list[str], reps: int,
              model: str, max_turns: int = 10,
+             temperature: float = 1.0,
              output_root: Path = RUNS_DIR) -> Path:
     load_dotenv(override=True)
     started = datetime.now(timezone.utc)
@@ -332,6 +335,7 @@ def run_eval(*, fixtures: list[str], baselines: list[str], reps: int,
         "baselines": baselines,
         "reps": reps,
         "max_turns": max_turns,
+        "temperature": temperature,
         "fixture_registry": {k: FIXTURE_REGISTRY[k] for k in fixtures},
     }
     (run_dir / "config.json").write_text(json.dumps(config, indent=2))
@@ -366,6 +370,7 @@ def run_eval(*, fixtures: list[str], baselines: list[str], reps: int,
                     fixture=fixture, baseline=baseline, rep=rep,
                     model=model, max_turns=max_turns, run_dir=run_dir,
                     gold=gold, fixture_data=data, fixture_meta=meta,
+                    temperature=temperature,
                 )
                 results.append(rr)
                 result_jsonl.write(json.dumps(asdict(rr)) + "\n")
@@ -452,6 +457,10 @@ def main() -> None:
                    help="Concrete model id, or bare 'deepseek' / 'qwen' to "
                         "expand from $DEEPSEEK_MODEL / $QWEN_MODEL in .env.")
     p.add_argument("--max-turns", type=int, default=10)
+    p.add_argument("--temperature", type=float, default=1.0,
+                   help="Sampling temperature. Default 1.0; use 0.0 for the "
+                        "reproducibility sweep (CRITIQUE §92.2). Recorded in "
+                        "config.json so manifests stay auditable.")
     args = p.parse_args()
     # Load .env early so $DEEPSEEK_MODEL / $QWEN_MODEL are visible to
     # the shorthand expansion below.
@@ -465,6 +474,7 @@ def main() -> None:
     run_dir = run_eval(
         fixtures=args.fixtures, baselines=args.baselines,
         reps=args.reps, model=args.model, max_turns=args.max_turns,
+        temperature=args.temperature,
     )
     manifest = json.loads((run_dir / "manifest.json").read_text())
     print(f"\n[eval] wrote {run_dir}")
