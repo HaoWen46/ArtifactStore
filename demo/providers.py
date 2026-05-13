@@ -66,6 +66,36 @@ class ProviderError(RuntimeError):
     pointed error message instead of letting the SDK 401."""
 
 
+# Env var holding each provider's default concrete model id. Lets the
+# .env file pin a specific model (e.g. DEEPSEEK_MODEL=deepseek-v4-pro)
+# and lets callers pass `--model deepseek` as shorthand without
+# hard-coding versions in the codebase.
+_MODEL_ENV: dict[str, str] = {
+    "deepseek": "DEEPSEEK_MODEL",
+    "qwen": "QWEN_MODEL",
+}
+
+
+def resolve_model_shorthand(model: str) -> str:
+    """Expand a bare provider name ('deepseek', 'qwen') to the concrete
+    model id pinned in the corresponding *_MODEL env var. Any input that
+    is already a concrete model id (e.g. 'deepseek-v4-pro') passes
+    through unchanged. Raises ProviderError if the shorthand resolves
+    to an empty/missing env var — better than silently defaulting."""
+    key = model.lower().strip()
+    if key not in _MODEL_ENV:
+        return model
+    env_name = _MODEL_ENV[key]
+    pinned = os.environ.get(env_name, "").strip()
+    if not pinned:
+        raise ProviderError(
+            f"--model {model!r} is shorthand for the value of {env_name} "
+            f"in .env, but {env_name} is unset or empty. Either set "
+            f"{env_name}=... in .env or pass a concrete model id."
+        )
+    return pinned
+
+
 def _detect(model: str) -> str:
     """Return the registry key for a model name. Raises ProviderError if
     the model has no recognised provider prefix — no silent fallback."""

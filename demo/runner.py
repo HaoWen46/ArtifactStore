@@ -352,7 +352,8 @@ def main() -> None:
     p.add_argument("--model", default=DEFAULT_MODEL,
                    help="Model id (default: deepseek-v4-pro). Use deepseek-* "
                         "or qwen* prefixes — the provider is resolved from "
-                        "the prefix.")
+                        "the prefix. Bare 'deepseek' or 'qwen' expand to "
+                        "$DEEPSEEK_MODEL / $QWEN_MODEL from .env.")
     p.add_argument("--base-url", default=None,
                    help="Override provider endpoint. By default the URL is "
                         "resolved from the model prefix: DeepSeek -> "
@@ -375,6 +376,13 @@ def main() -> None:
                         "If False, we cannot rely on force_terminator and "
                         "must lean on max_turns + prompting instead.")
     args = p.parse_args()
+    # `--model deepseek` / `--model qwen` are shorthand: expand to the
+    # concrete id pinned in DEEPSEEK_MODEL / QWEN_MODEL .env var.
+    from demo.providers import resolve_model_shorthand, ProviderError
+    try:
+        args.model = resolve_model_shorthand(args.model)
+    except ProviderError as exc:
+        raise SystemExit(f"[runner] {exc}")
     if args.check_config:
         raise SystemExit(_check_config(args.model, args.base_url))
     if args.verify_tool_use:

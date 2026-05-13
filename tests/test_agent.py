@@ -19,8 +19,8 @@ from demo.agent import (
 
 
 PROVIDER_ENV_VARS = (
-    "DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL",
-    "QWEN_API_KEY", "QWEN_BASE_URL",
+    "DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "DEEPSEEK_MODEL",
+    "QWEN_API_KEY", "QWEN_BASE_URL", "QWEN_MODEL",
     # Cleared too in case something in the parent shell exports a stale
     # Anthropic env — must NOT influence the resolver.
     "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL",
@@ -199,6 +199,35 @@ def test_resolver_uses_correct_key_per_provider(monkeypatch):
     assert key_q == "QK-qwen"
     assert "dashscope-intl.aliyuncs.com" in url_q
     assert "Qwen" in prov_q.name
+
+
+def test_model_shorthand_expands_from_env(monkeypatch):
+    """`--model deepseek` expands to $DEEPSEEK_MODEL; `--model qwen`
+    expands to $QWEN_MODEL. Concrete ids pass through unchanged.
+    Both providers' MODEL env vars are read independently — no leak."""
+    from demo.providers import resolve_model_shorthand
+    _clear_env(monkeypatch)
+    monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-v4-pro")
+    monkeypatch.setenv("QWEN_MODEL", "qwen3.6-plus")
+    assert resolve_model_shorthand("deepseek") == "deepseek-v4-pro"
+    assert resolve_model_shorthand("qwen") == "qwen3.6-plus"
+    # Concrete ids untouched.
+    assert resolve_model_shorthand("deepseek-v4-flash") == "deepseek-v4-flash"
+    assert resolve_model_shorthand("qwen3-coder-plus") == "qwen3-coder-plus"
+
+
+def test_model_shorthand_raises_when_env_missing(monkeypatch):
+    """`--model qwen` with no $QWEN_MODEL must raise, not silently
+    default — an empty .env value is operator error, not a quiet
+    fallback."""
+    from demo.providers import resolve_model_shorthand, ProviderError
+    _clear_env(monkeypatch)
+    monkeypatch.delenv("QWEN_MODEL", raising=False)
+    with pytest.raises(ProviderError, match="QWEN_MODEL"):
+        resolve_model_shorthand("qwen")
+    monkeypatch.setenv("QWEN_MODEL", "   ")  # whitespace counts as empty
+    with pytest.raises(ProviderError, match="QWEN_MODEL"):
+        resolve_model_shorthand("qwen")
 
 
 def test_describe_reports_unknown_provider(monkeypatch):

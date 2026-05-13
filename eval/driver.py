@@ -448,9 +448,19 @@ def main() -> None:
                    default=list(BASELINES.keys()),
                    choices=list(BASELINES.keys()))
     p.add_argument("--reps", type=int, default=1)
-    p.add_argument("--model", default="deepseek-v4-pro")
+    p.add_argument("--model", default="deepseek-v4-pro",
+                   help="Concrete model id, or bare 'deepseek' / 'qwen' to "
+                        "expand from $DEEPSEEK_MODEL / $QWEN_MODEL in .env.")
     p.add_argument("--max-turns", type=int, default=10)
     args = p.parse_args()
+    # Load .env early so $DEEPSEEK_MODEL / $QWEN_MODEL are visible to
+    # the shorthand expansion below.
+    load_dotenv(override=True)
+    from demo.providers import resolve_model_shorthand, ProviderError
+    try:
+        args.model = resolve_model_shorthand(args.model)
+    except ProviderError as exc:
+        raise SystemExit(f"[eval] {exc}")
 
     run_dir = run_eval(
         fixtures=args.fixtures, baselines=args.baselines,
