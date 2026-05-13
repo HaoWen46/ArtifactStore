@@ -329,6 +329,76 @@ def test_natural_termination_before_cap():
     assert "done" in r.final_text
 
 
+def test_tool_choice_latches_after_first_rejection():
+    """Once a provider rejects tool_choice in a run, the agent must latch
+    and stop sending it on subsequent turns — Qwen3.6 thinking mode and
+    DeepSeek-reasoner both 400 on tool_choice. Without the latch we'd
+    waste an extra round-trip on every terminator-trigger turn."""
+    from demo.agent import Tool
+
+    class Block:
+        def __init__(self, **kw):
+            for k, v in kw.items():
+                setattr(self, k, v)
+
+    class Usage:
+        input_tokens = 1
+        output_tokens = 1
+
+    class Resp:
+        def __init__(self, content, stop_reason="tool_use"):
+            self.content = content
+            self.stop_reason = stop_reason
+            self.usage = Usage()
+
+    class C:
+        """Rejects every request with tool_choice set; succeeds without."""
+        def __init__(self):
+            self.calls: list[dict | None] = []
+            self.turn = 0
+
+        @property
+        def messages(self):
+            return self
+
+        def create(self, **kwargs):
+            self.calls.append(kwargs.get("tool_choice"))
+            if "tool_choice" in kwargs:
+                raise RuntimeError(
+                    "InvalidParameter: tool_choice not supported in thinking mode"
+                )
+            self.turn += 1
+            # Loop a tool_use so the agent stays in the terminator window
+            # for at least 2 more turns, exercising the latch.
+            if self.turn < 3:
+                return Resp([Block(type="tool_use", id=f"t{self.turn}",
+                                   name="noop", input={})], "tool_use")
+            return Resp([Block(type="text", text="done")], "end_turn")
+
+    noop = Tool(name="noop", description="no-op",
+                input_schema={"type": "object", "properties": {}},
+                fn=lambda **_: "ok")
+    client = C()
+    a = Agent(name="x", system="", tools=[noop],
+              config=ModelConfig(max_turns=3),
+              client=client, force_terminator="noop")
+    r = a.run("go")
+    assert r.stop_reason == "end_turn"
+    # turns=1: pre-terminator-window, no tool_choice.
+    # turns=2: tool_choice set → rejected → retry without → latched.
+    # turns=3: latch on, skip tool_choice → plain call.
+    # Without the latch, turn 3 would re-send tool_choice and waste
+    # another round-trip.
+    assert client.calls[0] is None
+    assert client.calls[1] == {"type": "any"}
+    assert all(c is None for c in client.calls[2:]), (
+        f"latch failed; later calls re-sent tool_choice: {client.calls}"
+    )
+    # Exactly one tool_choice request → one retry: 4 total calls.
+    assert sum(1 for c in client.calls if c == {"type": "any"}) == 1
+    assert a._tool_choice_unsupported is True
+
+
 def test_tool_choice_falls_back_when_provider_rejects():
     """If the SDK raises with 'tool_choice' in the message, retry without it.
     This handles DeepSeek's reasoning model rejecting named tool_choice."""

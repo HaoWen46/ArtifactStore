@@ -124,6 +124,10 @@ class Agent:
         self.force_terminator = force_terminator
         self._tool_dict = {t.name: t for t in tools}
         self.messages: list[dict[str, Any]] = []
+        # Latched once we've observed the provider reject tool_choice
+        # (Qwen3.6 thinking mode, DeepSeek-reasoner). Skips sending it on
+        # later turns to avoid the wasted-retry round-trip.
+        self._tool_choice_unsupported: bool = False
 
     def _exec_tool(self, call) -> dict[str, Any]:
         block: dict[str, Any] = {"type": "tool_result", "tool_use_id": call.id}
@@ -178,19 +182,24 @@ class Agent:
             # Best-effort terminator nudge in the final 2 turns: force the
             # model to use SOME tool. We use {type: any} (broadly supported)
             # rather than {type: tool, name: ...}, which DeepSeek's reasoning
-            # models reject with 400. This relies on the system prompt to
-            # bias toward submit_report; max_turns is the actual safety net.
+            # models reject with 400. Once a provider rejects tool_choice
+            # in this run, we latch and stop sending it — saves the
+            # wasted-retry round-trip on subsequent turns. max_turns is
+            # the actual safety net.
             if (self.force_terminator
-                    and turns >= self.config.max_turns - 1):
+                    and turns >= self.config.max_turns - 1
+                    and not self._tool_choice_unsupported):
                 kwargs["tool_choice"] = {"type": "any"}
 
             try:
                 resp = self.client.messages.create(**kwargs)
             except Exception as e:
-                # Defensive: if the provider rejects tool_choice (some do),
-                # retry once without it. Surfacing the original error keeps
-                # other failures (rate limits, auth) loud.
+                # Defensive: if the provider rejects tool_choice, retry
+                # once without it AND latch so we don't try again this
+                # run. Surfacing the original error otherwise keeps
+                # auth/rate-limit failures loud.
                 if "tool_choice" in kwargs and "tool_choice" in str(e):
+                    self._tool_choice_unsupported = True
                     kwargs.pop("tool_choice")
                     resp = self.client.messages.create(**kwargs)
                 else:
