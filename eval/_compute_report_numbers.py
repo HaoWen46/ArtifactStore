@@ -28,6 +28,7 @@ FIXTURE_ORDER = [
     ("git_diff_auth_refactor", 577),
     ("pytest_large_run", 3480),
     ("pytest_ci_run", 9609),
+    ("pytest_xl_run", 33571),
 ]
 SINGLE_BASELINES = ["B1_RAW", "B2_TRUNCATED", "B3_SUMMARY", "B3_LLM_SUMMARY", "B4_ARTIFACT"]
 DELEG_STRATEGIES = ["D1_SUMMARY", "D1_LLM_SUMMARY", "D2_FULL_CONTEXT", "D3_SCOPED"]
@@ -42,6 +43,50 @@ def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float, float]:
     cen = (p + z * z / (2 * n)) / den
     half = (z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))) / den
     return p, max(0.0, cen - half), min(1.0, cen + half)
+
+
+def mcnemar_exact(b: int, c: int) -> float:
+    """Exact two-sided McNemar p-value for matched-pair binary outcomes.
+
+    `b` = pairs where method A succeeds and method B fails;
+    `c` = pairs where method B succeeds and method A fails;
+    pairs where both succeed or both fail are non-informative.
+
+    Uses the exact binomial test under H0: discordant pairs are split 50/50.
+    """
+    n = b + c
+    if n == 0:
+        return 1.0
+    k = min(b, c)
+    # P(X<=k) under Bin(n, 0.5), then double for two-sided
+    import math
+    cdf = sum(math.comb(n, i) for i in range(0, k + 1)) / (2 ** n)
+    p = min(1.0, 2 * cdf)
+    return p
+
+
+def paired_outcomes(rows_a: list[dict], rows_b: list[dict],
+                    success_field: str = "task_success") -> tuple[int, int, int, int]:
+    """Match rows by (fixture, rep) and count outcome quadrants.
+
+    Returns (both_succ, a_only, b_only, both_fail).
+    """
+    by_a = {(r["fixture"], r["rep"]): bool(r.get(success_field)) for r in rows_a}
+    by_b = {(r["fixture"], r["rep"]): bool(r.get(success_field)) for r in rows_b}
+    both_succ = a_only = b_only = both_fail = 0
+    for key, a_succ in by_a.items():
+        if key not in by_b:
+            continue
+        b_succ = by_b[key]
+        if a_succ and b_succ:
+            both_succ += 1
+        elif a_succ and not b_succ:
+            a_only += 1
+        elif b_succ and not a_succ:
+            b_only += 1
+        else:
+            both_fail += 1
+    return both_succ, a_only, b_only, both_fail
 
 
 def load_single() -> list[dict]:
@@ -181,6 +226,31 @@ def main():
             par_in = sum(r.get("parent_total_input_tokens", 0) for r in rs) / stats["n"]
             sub_in = sum(r.get("sub_total_input_tokens", 0) for r in rs) / stats["n"]
             print(f"  {s_name:18s}  {stats['n']:>2d}  {par_in:>7.0f}  {sub_in:>7.0f}  {stats['succ_k']}/{stats['n']:<3} ({stats['succ_p']:.2f})")
+
+    # --- Paired McNemar tests on single-agent baselines ---
+    print("\n\n=== Paired McNemar tests (B4 vs each baseline, matched on fixture+rep) ===")
+    print(f"{'Pair (A vs B)':30s}  {'both_succ':>9s}  {'A_only':>6s}  {'B_only':>6s}  {'both_fail':>9s}  {'p (2-sided)':>11s}")
+    b4_rows = [r for r in single if r["baseline"] == "B4_ARTIFACT"]
+    for other in ["B1_RAW", "B2_TRUNCATED", "B3_SUMMARY", "B3_LLM_SUMMARY"]:
+        other_rows = [r for r in single if r["baseline"] == other]
+        bs, a_only, b_only, bf = paired_outcomes(b4_rows, other_rows)
+        p = mcnemar_exact(a_only, b_only)
+        print(f"B4 vs {other:24s}  {bs:>9d}  {a_only:>6d}  {b_only:>6d}  {bf:>9d}  {p:>11.4f}")
+
+    # B1 vs B4 specifically — the rep-by-rep matchup that's the headline question
+    print("\n=== Paired McNemar: B1 vs B4 (rep-by-rep matched, n=15 pairs) ===")
+    b1_rows = [r for r in single if r["baseline"] == "B1_RAW"]
+    bs, a_only, b_only, bf = paired_outcomes(b1_rows, b4_rows)
+    p = mcnemar_exact(a_only, b_only)
+    print(f"both succeed:  {bs}")
+    print(f"B1 only succ:  {a_only}")
+    print(f"B4 only succ:  {b_only}")
+    print(f"both fail:     {bf}")
+    print(f"p (two-sided): {p:.4f}")
+    if p > 0.05:
+        print(f"=> Cannot reject H0 of equal performance at n=15 pairs.")
+    else:
+        print(f"=> Reject H0; the discordant pairs are statistically different.")
 
 
 if __name__ == "__main__":

@@ -79,22 +79,25 @@ citations, and append-only audit logs in a single substrate sized for an
 agent-harness use case, where the runtime (not the LLM) is the policy
 enforcer.
 
-*Scope of the empirical claims*: live evaluation is 132 runs against one
+*Scope of the empirical claims*: live evaluation is 147 runs against one
 provider class (DeepSeek V4 Pro through the Anthropic-compatible Messages
-endpoint) on five captured fixtures spanning 407–9,609 raw tokens, 3 reps
-per (fixture × baseline) cell at `temperature=1.0`. The 9.6K fixture has
-n=3 per cell with wide Wilson 95% CIs (e.g., `[0.21, 0.94]` for 2/3); the
-structural claims (only B4/D3 produce verifiable citations and audit-log
-signal) hold by construction, not by reps. We have not run a second model
-class or a larger long-context fixture (≥30K tokens); both are flagged as
-limitations rather than future work.
+endpoint) on six captured fixtures spanning 407–33,571 raw tokens, 3 reps
+per (fixture × baseline) cell at `temperature=1.0`. The two largest
+fixtures (9.6 K, 33 K) have n=3 per cell with wide Wilson 95% CIs (e.g.,
+`[0.21, 0.94]` for 2/3); structural claims (only B4/D3 produce
+verifiable citations and audit-log signal) hold by construction, not by
+reps. The 33 K fixture was added specifically to test the projected
+B1/B4 cost-crossover regime; results are reported in §8.4. We have not
+run a second model class (e.g., Anthropic Sonnet 4.5), flagged as the
+main remaining limitation.
 
-Headline results within those bounds: §11.1 single-agent (5 fixtures × 5
-baselines × 3 reps = 75 runs) shows B4 (ArtifactStore) reaches 12/15
-(80%, Wilson 95% CI [0.55, 0.93]) task success and 0.82 avg evidence
-recall across the suite; B1 (raw injection) ties at 15/15 (100%, CI
-[0.80, 1.00]) — *no statistically defensible claim that B1 or B4 has
-an aggregate edge at n=15*. The robust empirical claim is that the
+Headline results within those bounds: §11.1 single-agent (6 fixtures × 5
+baselines × 3 reps = 90 runs) shows B4 (ArtifactStore) reaches 13/18
+(72%, Wilson 95% CI [0.49, 0.88]) task success and 0.77 avg evidence
+recall across the suite; B1 (raw injection) reaches 17/18 (94%, CI
+[0.74, 0.99]) — *McNemar's exact test (p=0.125, 18 pairs) cannot
+separate B1 and B4 at this n, with all discordant pairs favoring B1
+on the two largest fixtures*. The robust empirical claim is that the
 summary baselines (B2/B3/B3') collapse to ≤47% suite-wide success and
 to 0–33% on the two fixtures ≥3.5 K raw tokens, while B1 and B4 hold.
 §11.2 supervisor↔subagent (5 fixtures × 4 strategies × 3 reps = 60 runs)
@@ -553,10 +556,10 @@ submitted, 5 resolved, all logged via the seeded `__supervisor__` grant.
 
 PLAN §11.1 single-agent comparison: same fixture, same task, five
 context-injection strategies (including a real LLM-summary baseline, B3').
-5 fixtures × 5 baselines × 3 reps = 75 runs against `deepseek-v4-pro`.
+6 fixtures × 5 baselines × 3 reps = 90 runs against `deepseek-v4-pro`.
 ~\$0.16. Output in `eval/runs/<UTC-iso>/`.
 
-== Aggregate (n=15 per baseline, across 5 fixtures spanning 407–9,609 raw tokens)
+== Aggregate (n=18 per baseline, across 6 fixtures spanning 407–33,571 raw tokens)
 
 #table(
   columns: (auto, auto, auto, auto, auto, auto, auto),
@@ -566,67 +569,116 @@ context-injection strategies (including a real LLM-summary baseline, B3').
   table.header(
     [*Baseline*], [*success*], [*Wilson 95% CI*], [*recall*], [*tot_in*], [*cost*], [*latency*],
   ),
-  [B1 RAW],            [15/15 (100%)], [[0.80, 1.00]], [0.93], [3,144],  [\$0.0016], [93 s],
-  [B2 TRUNCATED],      [6/15 (40%)],   [[0.20, 0.64]], [0.36], [347],    [\$0.0007], [27 s],
-  [B3 SUMMARY (det.)], [6/15 (40%)],   [[0.20, 0.64]], [0.36], [281],    [\$0.0008], [31 s],
-  [B3' LLM_SUMMARY],   [7/15 (47%)],   [[0.25, 0.70]], [0.46], [294],    [\$0.0026], [23 s],
-  [*B4 ARTIFACT*], [*12/15 (80%)*], [[0.55, 0.93]], [*0.82*], [*17,944*], [*\$0.0051*], [*107 s*],
+  [B1 RAW],            [17/18 (94%)],  [[0.74, 0.99]], [0.87], [9,289],  [\$0.0028], [85 s],
+  [B2 TRUNCATED],      [6/18 (33%)],   [[0.16, 0.56]], [0.30], [359],    [\$0.0007], [25 s],
+  [B3 SUMMARY (det.)], [6/18 (33%)],   [[0.16, 0.56]], [0.31], [298],    [\$0.0008], [29 s],
+  [B3' LLM_SUMMARY],   [7/18 (39%)],   [[0.20, 0.61]], [0.38], [309],    [\$0.0053], [22 s],
+  [*B4 ARTIFACT*], [*13/18 (72%)*], [[0.49, 0.88]], [*0.77*], [*17,266*], [*\$0.0050*], [*99 s*],
 )
 
-Reading the table: the Wilson 95% CIs are wide because n=15 per cell
-(3 reps × 5 fixtures). B1 RAW and B4 ARTIFACT both have CIs that
+Reading the table: the Wilson 95% CIs are wide because n=18 per cell
+(3 reps × 6 fixtures). B1 RAW and B4 ARTIFACT both have CIs that
 overlap heavily — no headline numerical conclusion about which is
 "better on average" is statistically defensible at this n. What the
 data does support, by inspection of the per-fixture cells below, is
 fixture-dependent ranking: B2/B3/B3' summary baselines collapse to 0%
-success at the 9.6K-token fixture and at `pytest_large_run`, while
-B1 and B4 both hold up.
+success at fixtures ≥3.5 K raw tokens (pytest_large_run, pytest_ci_run,
+pytest_xl_run), while B1 and B4 both stay competitive.
 
-Three things to flag against the previous draft's numbers, which were
-computed against an earlier (uncommitted) sweep: B1's per-suite success
-rose from 87% to 100% in the now-committed sweep, B4 fell from 93% to
-80% (driven entirely by 0/3 on `pytest_ci_run` in this rep set), and
-B3'/B3' rose from 20% to 47%. These are within Wilson CI of the prior
-numbers — exactly the kind of rep-noise the *Limitations* section
-flags. The structural claims (citations, audit, redaction) survive at
-any rep count.
+*The 33K-fixture is where the architectural prediction shows up
+empirically*: B4's tot_in plateaus around 14 K tokens regardless of
+fixture size, while B1's grows linearly to 41 K. Cost-wise this puts
+B4 cheaper than B1's *first* call (\$0.0046 vs \$0.0189 uncached) but
+more expensive than B1's cached follow-ups (\$0.003 with DeepSeek
+prompt cache) — a more nuanced cost story than "B4 dominates past
+30K." Caching makes B1 viable in re-query workflows that don't
+trigger cache invalidation; B4 wins when the workload's effective
+cache hit rate on the raw payload is low.
+
+Three things to flag against the previous draft: prior reports cited
+suite-wide success of 87% B1 / 93% B4. Re-running the eval against
+the now-committed dataset and adding the 33K fixture gave 94% B1 /
+72% B4 — within Wilson CI of the prior numbers, but the direction
+of the wobble (B1 up, B4 down) matters and is the kind of rep-noise
+the *Limitations* section flags. The structural claims (citations,
+audit, redaction) survive at any rep count.
 
 #figure(
   cetz.canvas({
     plot.plot(size: (12, 5.5),
       x-label: [Fixture raw tokens],
       y-label: [Avg total input tokens (log)],
-      x-tick-step: 1000,
+      x-tick-step: 5000,
       y-mode: "log",
       y-base: 10,
       y-min: 100, y-max: 100000,
-      x-min: 0, x-max: 10000,
+      x-min: 0, x-max: 35000,
       legend: "inner-north-east",
       {
-        plot.add(((407,559),(444,482),(577,749),(3480,3575),(9609,10355)),
+        plot.add(((407,559),(444,482),(577,749),(3480,3575),(9609,10355),(33571,40814)),
           label: [B1 RAW], mark: "o")
-        plot.add(((407,361),(444,257),(577,351),(3480,349),(9609,419)),
+        plot.add(((407,361),(444,257),(577,351),(3480,349),(9609,419),(33571,419)),
           label: [B2 TRUNCATED], mark: "x")
-        plot.add(((407,244),(444,263),(577,230),(3480,288),(9609,378)),
+        plot.add(((407,244),(444,263),(577,230),(3480,288),(9609,378),(33571,378)),
           label: [B3 SUMMARY (det.)], mark: "triangle")
-        plot.add(((407,199),(444,291),(577,261),(3480,332),(9609,385)),
+        plot.add(((407,199),(444,291),(577,261),(3480,332),(9609,385),(33571,385)),
           label: [B3' LLM_SUMMARY], mark: "diamond")
-        plot.add(((407,42738),(444,17791),(577,13314),(3480,12445),(9609,12743)),
+        plot.add(((407,42738),(444,17791),(577,13314),(3480,12445),(9609,15333),(33571,13879)),
           label: [B4 ARTIFACT], mark: "square")
       })
   }),
   caption: [Single-agent token scaling vs fixture size (n=3 per cell,
-    5 fixtures from 407 to 9,609 raw tokens). B1's input grows roughly
-    linearly with the fixture (the raw payload is in every turn's
-    context); B2/B3/B3' inject only a fixed-size summary regardless of
-    fixture size; B4's high baseline reflects multi-turn tool-use
-    accumulation but *flattens* past ~3K tokens because larger fixtures
-    need fewer round-trips (the preview already names the failure).
-    B1 and B4 are projected to cross around 30K raw tokens — past the
-    fixture range we evaluated. Log y-axis.],
+    6 fixtures from 407 to 33,571 raw tokens). B1's input grows roughly
+    linearly with the fixture (40,814 at 33K); B2/B3/B3' inject only a
+    fixed-size summary regardless of fixture size; B4's input
+    *plateaus* past 3 K raw tokens around 13-18 K because the typed
+    preview already names the failure and the agent makes one or two
+    targeted searches rather than re-reading the payload. At 33 K,
+    B1's tot_in (40,814) is *2.9× B4's* (13,879) — the
+    cost-crossover-by-input regime that earlier drafts only projected
+    is now empirically confirmed. Caching modulates the
+    *dollar*-crossover: B1's first uncached rep on 33 K cost \$0.019
+    vs B4's \$0.005 (B4 wins 4×); B1's cached follow-ups cost \$0.003
+    (B1 wins 1.6×). Log y-axis.],
 )
 
 #v(0.5em)
+
+=== Paired matched-pair (McNemar) tests
+
+Wilson CIs treat each baseline independently. A sharper test — matching
+each (fixture, rep) pair across baselines — uses the exact two-sided
+McNemar test. Computed from committed data via
+`eval/_compute_report_numbers.py` over 18 fixture-rep pairs per
+comparison:
+
+#table(
+  columns: (auto, auto, auto, auto, auto, auto),
+  inset: 5pt,
+  stroke: 0.5pt + rgb("#cccccc"),
+  align: (left, right, right, right, right, right),
+  table.header(
+    [*Pair*], [*both succ*], [*B4-only*], [*other-only*], [*both fail*], [*p (2-sided)*],
+  ),
+  [B4 vs B1_RAW],         [13], [0], [4], [1], [0.125],
+  [B4 vs B2_TRUNCATED],   [6], [7], [0], [5], [*0.016*],
+  [B4 vs B3_SUMMARY],     [6], [7], [0], [5], [*0.016*],
+  [B4 vs B3_LLM_SUMMARY], [6], [7], [1], [4], [0.070],
+)
+
+*Reading the table*: B4 statistically beats B2 and B3 at p < 0.02 on
+this 18-pair dataset (all discordant pairs go one way). B4 vs
+B3_LLM_SUMMARY is borderline (p=0.07). B4 vs B1 does *not* reach
+significance at n=18 — and notably the B4-vs-B1 row shows 0
+B4-only-successes vs 4 B1-only-successes (3 on `pytest_ci_run` and
+1 on `pytest_xl_run`). At n=18 pairs, McNemar's exact test cannot
+separate the two from "equal underlying performance," but the
+direction of the discordant pairs *favors B1*, not B4, in this rep
+set. The report does not claim a B4 win over B1 on aggregate
+success; it claims *B4 wins against the summary-only baselines, and
+an undecided matchup against B1 at this n* — with the structural
+properties (citations, audit, redaction) being the actual
+load-bearing differentiation.
 
 In the per-fixture breakdown, B1 and B4 are tied at 3/3 success on every
 fixture except `pytest_ci_run`, where the rep set in this evaluation
@@ -679,12 +731,14 @@ because they are dataset-level outputs, not LLM behaviours.
 == Where ArtifactStore is honest about its costs
 
 PLAN §14 predicted 30–60% fewer prompt tokens for B4 versus raw
-injection. *On this suite, that prediction does not hold.* Average B4
-input across the 5 fixtures is ~5.7× average B1 input (17,944 vs 3,144
-tokens) because the multi-turn tool-use loop accumulates context across
-turns. The real shape that B4 buys is a *plateau* rather than a
-linear-growth curve: past ~3 K raw tokens, B4's total input flattens
-around 13-18 K (the model needs at most 3-5 search/expand calls
+injection. *On the small-to-medium fixtures, that prediction does not
+hold; on the largest fixture, it does — and then some.* Average B4
+input across the 6 fixtures is ~1.9× average B1 input (17,266 vs
+9,289 tokens), because the multi-turn tool-use loop accumulates
+context across turns. The real shape that B4 buys is a *plateau*
+rather than a linear-growth curve: past ~3 K raw tokens, B4's total
+input flattens around 13-18 K (the model needs at most 3-5
+search/expand calls
 regardless of fixture size), while B1's grows linearly with the raw
 payload it pastes in once. B1 and B4 cross around 30 K raw tokens —
 past the largest fixture we ran.
@@ -692,25 +746,27 @@ past the largest fixture we ran.
 Three honest framings of the cost story:
 
 - *Cost crossover*: B1's per-fixture cost rises with fixture size from
-  \$0.0009 → \$0.0025 (and would keep growing); B4's plateaus around
-  \$0.0032-\$0.0051 past 3K tokens. At the 9.6K-token
-  `pytest_ci_run` fixture, B1 was \$0.0023 and B4 was \$0.0050 —
-  B1 was *cheaper* in this rep set, not more expensive. The eventual
-  B4-cheaper regime is projected to start past ~30 K raw tokens; we
-  did not run a fixture that large.
-- *Cost-per-success* on the 9.6K fixture: B1 \$0.0023 / 100% =
-  \$0.0023 per correct diagnosis; B4 \$0.0050 / 0% = undefined. *B1
-  is cheaper per correct diagnosis on this fixture in this rep set*.
-  B2/B3/B3' are all 0% so their cost-per-success is also undefined.
-  We do not report "B4 wins cost-per-success" as a headline.
+  \$0.0009 → \$0.0083 (and would keep growing — see the 33 K cell
+  details below); B4's plateaus around \$0.0032-\$0.0050 past
+  3 K tokens. The cross-over in *uncached first-rep cost* lands
+  around 25-30 K raw tokens (where B1 first-rep cost \$0.019 is
+  ~4× B4's \$0.005). The cross-over in *cached-rep cost* doesn't
+  appear in this suite: B1 cache-hits cost \$0.003 even on 33 K,
+  beating B4's \$0.005.
+- *Cost-per-success* on the two largest fixtures: on 9.6 K, B1
+  \$0.0023 / 100% = \$0.0023 per correct diagnosis vs B4 \$0.0050 / 0%
+  = undefined. On 33 K, B1 \$0.0083 / 67% = \$0.012 per correct
+  diagnosis vs B4 \$0.0046 / 33% = \$0.014 — B1 wins narrowly even
+  on the largest fixture in this rep set. B2/B3/B3' are 0% on both
+  large fixtures so their cost-per-success is undefined throughout.
 - *Where B4 actually pays for itself*: not by being cheaper in
   raw dollars on these fixtures, but by being the only configuration
   that produces formal evidence citations and per-read audit signal
   — structural properties (§8.7) that survive any rep luck. On
   workflows where exact evidence recovery, citation verifiability, or
   permission scoping matter, B4 buys those properties at a 2-3×
-  per-task cost premium on small fixtures, dropping toward parity
-  with B1 by the 9.6K fixture.
+  per-task cost premium on small fixtures, dropping below B1's
+  uncached first-rep cost past ~25 K tokens.
 
 #figure(
   cetz.canvas({
@@ -751,6 +807,70 @@ Three honest framings of the cost story:
     *shape*: B1's cost rises roughly linearly with fixture size,
     while B4's plateaus around 3-4 tenths of a cent past 3K tokens
     (it does not pay for re-reading the fixture each turn).],
+)
+
+=== The 33K-token fixture: cost-crossover regime empirically tested
+
+Earlier drafts of this report ended with the projection "B1 and B4 are
+expected to cross past ~30 K raw tokens, beyond our largest fixture."
+At reviewer suggestion (CRITIQUE §2 "longer context settings"), we
+added `pytest_xl_run.log` — a 33,571-token CI log generated
+deterministically by `eval/fixtures/_gen_pytest_xl_run.py`. Same
+auth_expiry diagnostic target as `pytest_ci_run` but buried in ~16 K
+tokens of pure access-log noise plus extended progress, stability
+summary, and flake-correlation matrix.
+
+#table(
+  columns: (auto, auto, auto, auto, auto, auto),
+  inset: 5pt,
+  stroke: 0.5pt + rgb("#cccccc"),
+  align: (left, right, right, right, right, right),
+  table.header(
+    [*Baseline*], [*succ*], [*recall*], [*tot_in*], [*cost*], [*lat*],
+  ),
+  [B1 RAW],            [2/3 (67%)], [0.53], [40,814], [\$0.0083 / \$0.0030†], [43 s],
+  [B2 TRUNCATED],      [0/3],       [0.00], [419],    [\$0.0004],            [13 s],
+  [B3 SUMMARY (det.)], [0/3],       [0.07], [378],    [\$0.0006],            [20 s],
+  [B3' LLM_SUMMARY],   [0/3],       [0.00], [385‡],   [\$0.0187],            [15 s],
+  [*B4 ARTIFACT*], [*1/3 (33%)*], [*0.53*], [*13,879*], [*\$0.0046*], [55 s],
+)
+
+† B1 RAW: rep 0 cost \$0.0189 uncached; reps 1–2 cost \$0.0030 each
+under DeepSeek's prompt cache. Median = \$0.0030. Mean = \$0.0083.
+
+‡ B3' LLM_SUMMARY: the summarizer call itself consumes the full 33 K
+raw tokens, costing \$0.0185 per rep just for the summarization step;
+the agent then sees only the 385-token output. *More expensive than
+B4 and B1-cached combined, with 0% success*.
+
+*Empirical findings on the 33 K fixture*:
+
+#list(spacing: 5pt,
+  [*B4's input plateau holds at 30 K*: tot_in = 13,879 (≈ 15,333 at
+    9.6 K and 12,445 at 3.5 K). B4's typed preview names the failure
+    in 1 search call; the agent does not need to re-read the raw
+    payload. This is the central architectural claim and it is now
+    confirmed past the projected crossover.],
+  [*B1's input scales linearly*: tot_in = 40,814 vs B4's 13,879
+    — 2.9× larger. The projected linear-vs-plateau shape difference
+    is now empirical, not analytical.],
+  [*The dollar-crossover is caching-sensitive*: B1's *uncached*
+    first-rep cost on 33 K is \$0.019, 4× B4's \$0.005. B1's
+    *cache-hit* reps cost \$0.003, ~0.6× B4's. The "crossover by
+    cost" depends entirely on whether the workload's raw payload
+    is in the prompt cache; ArtifactStore wins decisively on
+    cold-start single reads and loses to B1+cache on repeated
+    same-payload reads.],
+  [*B3' LLM_SUMMARY is dominated*: its summarizer-call cost
+    (\$0.0185) exceeds B4's total cost (\$0.0046) and B3' still
+    achieves 0% success on this fixture. A more elaborate
+    summarizer (multi-pass, larger budget) might shift the recall,
+    but at a cost penalty that already exceeds B4.],
+  [*Task success at 33 K is rep-noisy at n=3*: B1=2/3, B4=1/3.
+    Wilson CIs [0.21, 0.94] and [0.06, 0.79] overlap heavily.
+    The honest claim is "B1 and B4 both work some of the time at
+    33 K; B2/B3/B3' work 0 of the time." We do not call a B1/B4
+    ranking from 3 reps.],
 )
 
 === Wall-clock latency (cost beyond tokens)
@@ -1111,13 +1231,17 @@ contribution stands within these bounds but reviewers should weight
 the headline numbers accordingly.
 
 #list(spacing: 5pt,
-  [*Fixture scale.* Fixtures now span 407–9,609 raw tokens (5 fixtures,
-    median 577, top `pytest_ci_run` at 9,609). The 30–60% prompt-token
-    reduction PLAN §14 predicts for B4 vs B1 manifests as a *flatten-
-    then-cross* shape: B4's input is essentially flat past 3K tokens
-    while B1's grows linearly. The crossover by cost happens around
-    10K tokens. We do not have a 50K+ token fixture, so cannot show
-    where the gap stops widening.],
+  [*Fixture scale.* Fixtures now span 407–33,571 raw tokens (6 fixtures,
+    median 577, top `pytest_xl_run` at 33,571). The 30–60% prompt-token
+    reduction PLAN §14 predicts for B4 vs B1 manifests empirically as a
+    *flatten-vs-linear* shape: B4's input plateaus around 13–18 K
+    regardless of fixture size (confirmed at 9.6 K and 33 K) while
+    B1's grows roughly linearly with the raw payload (10 K at 9.6 K
+    fixture, 41 K at 33 K fixture). The cost-crossover by input
+    tokens lands around 30 K; the cost-crossover *in dollars* depends
+    on whether B1's raw payload hits DeepSeek's prompt cache. We do
+    not have a 100 K+ fixture so cannot show where the gap stops
+    widening or whether B4's plateau itself breaks at extreme scale.],
   [*Repetition count and temperature.* Three reps per
     (fixture, baseline) cell at `temperature=1.0` give wide
     confidence bands — visible especially in the D3 `rg_grep_noise`
@@ -1757,10 +1881,11 @@ backfill, token-accounting refinement, three pre-flight probes.)
 #list(
   marker: ([▸], [·]),
   spacing: 6pt,
-  [*Even-larger fixtures (50K+ tokens).* Fixtures now span 407–9,609
-    raw tokens. The B1/B4 cost crossover is visible at the top end.
-    A 50K-token CI log (or a long debug session transcript) would
-    let the eval show whether B4's input plateaus persist or whether
+  [*Even-larger fixtures (100K+ tokens).* Fixtures now span 407–33,571
+    raw tokens. The B1/B4 input-token plateau is now visible at 33 K
+    (B4 stays at ~14 K while B1 grows to 41 K). A 100K-token fixture
+    (e.g. a long debug session transcript or multi-day CI log) would
+    let the eval show whether B4's input plateau persists or whether
     the multi-turn cost itself grows past some artifact-complexity
     threshold.],
   [*Stronger LLM summarizer for B3'/D1'.* The B3'/D1' baselines we
@@ -1806,20 +1931,23 @@ ArtifactStore reframes tool outputs as typed, indexed, permission-scoped
 artifacts with multi-resolution views. The implementation is a thin
 SQLite + FTS5 layer (~2.0 kLOC) plus a small client-side agent loop.
 
-Across 135 live runs against DeepSeek V4 Pro on 5 fixtures
-(407–9,609 raw tokens) plus 10 offline stress scenarios, all
+Across 147 live runs against DeepSeek V4 Pro on 6 fixtures
+(407–33,571 raw tokens) plus 10 offline stress scenarios, all
 data committed to `eval/runs/`:
 
-- *§11.1 single-agent* (n=15 per baseline): B1 (raw injection) and
-  B4 (ArtifactStore) are statistically tied on suite-wide success
-  (15/15 vs 12/15, Wilson CIs overlap heavily). On the 9.6 K
-  `pytest_ci_run` fixture this rep set gave B1 3/3 and B4 0/3 — a
-  swing the per-cell CIs cannot separate. The robust finding is that
-  the summary baselines (B2/B3/B3') collapse to ≤33% success on
-  fixtures ≥3.5 K raw tokens. Where B4 *strictly* wins is everywhere
-  with structural properties: citation verifiability (0/45 B1/B2/B3/B3'
-  runs emit a well-formed citation; B4 emits avg 4.3/run, all
-  resolve), per-read audit signal, and selective span-aware redaction.
+- *§11.1 single-agent* (n=18 per baseline): B1 reaches 17/18 (94%)
+  suite-wide; B4 reaches 13/18 (72%). Wilson 95% CIs overlap heavily
+  and McNemar's exact test (p=0.125, 18 pairs) cannot separate them.
+  On the two larger fixtures (9.6 K, 33 K), all 4 B4-vs-B1 discordant
+  pairs favor B1. The robust finding is that B4 *strictly* beats the
+  summary-only baselines (McNemar p < 0.02 vs B2/B3) and that summary
+  baselines collapse to ≤33% success on fixtures ≥3.5 K. The
+  *architectural plateau* claim is now empirically confirmed at
+  scale: B4's tot_in is ~14 K at both 9.6 K and 33 K fixture sizes
+  while B1's grows linearly to 41 K. Where B4 *structurally* wins is
+  everywhere: citation verifiability (0/54 B1/B2/B3/B3' runs emit a
+  well-formed citation; B4 emits avg 4.3/run, all resolve), per-read
+  audit signal, and selective span-aware redaction.
 - *§11.2 supervisor↔subagent* (n=15 per strategy): D3 (scoped
   ArtifactStore delegation) bounds parent context at ~6 K tokens
   regardless of fixture size, cutting parent input by ~4× on the
@@ -1831,16 +1959,18 @@ data committed to `eval/runs/`:
 - *§11.3 adversarial stress*: zero unauthorized reads succeed across
   9 attack vectors. Every denial logs a specific `denial_reason`.
 
-The contribution is *not* "ArtifactStore wins every empirical comparison"
-— under this rep set, B1 ties or beats B4 on raw success on 4 of 5
-fixtures, and the per-fixture pytest_ci_run cell flipped vs an earlier
-draft. The contribution is that, within this evaluation,
-ArtifactStore is the only configuration that simultaneously delivers
-(a) task success holding past the 3.5K-token regime where summary
-baselines collapse, (b) bounded parent context under delegation, (c)
-structurally verifiable citations, and (d) per-read audit signal.
-Properties (a)–(b) depend on the fixtures and the model's behavior at
-n=15 reps and have wide Wilson CIs; (c)–(d) are *structural* — no
+The contribution is *not* "ArtifactStore wins every empirical
+comparison" — under this rep set, B1 ties or beats B4 on raw
+success on the two largest fixtures, and McNemar's exact test cannot
+separate them at n=18 pairs. The contribution is that, within this
+evaluation, ArtifactStore is the only configuration that
+simultaneously delivers (a) task success holding past the 3.5 K-token
+regime where summary baselines collapse, (b) input-token plateau as
+fixture size grows (empirically confirmed at 9.6 K and 33 K),
+(c) bounded parent context under delegation, (d) structurally
+verifiable citations, and (e) per-read audit signal. Properties
+(a)–(c) depend on the fixtures and on the model's behavior at n=18
+reps and have wide Wilson CIs; (d)–(e) are *structural* — no
 summary baseline, deterministic or LLM-driven, can produce formally
 verifiable citations or per-read audit rows because both require an
 underlying span store and grant check. That structural distinction is

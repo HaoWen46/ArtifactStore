@@ -87,6 +87,15 @@ FIXTURE_REGISTRY: dict[str, dict] = {
                                 "artifact_type": "pytest_failure",
                                 "ext": ".log",
                                 "reveal_target": False},
+    # ~30K-token XL CI log with 8 failures. Same auth_expiry bug, but
+    # buried in heavier captured-log tails (~16K of access-log noise),
+    # extended progress, stability summary, and flake-correlation
+    # matrix. Designed to test the projected B1/B4 cost crossover
+    # past the 10K regime. Target hidden.
+    "pytest_xl_run":          {"kind": "pytest", "target": "auth_expiry",
+                                "artifact_type": "pytest_failure",
+                                "ext": ".log",
+                                "reveal_target": False},
     "rg_grep_noise":          {"kind": "grep",   "target": "todos",
                                 "artifact_type": "grep_result",
                                 "ext": ".txt",

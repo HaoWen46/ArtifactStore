@@ -1,0 +1,44 @@
+{
+  "started_at": "2026-05-13T06:54:25.611122+00:00",
+  "finished_at": "2026-05-13T06:57:41.343512+00:00",
+  "elapsed_seconds": 195.73239,
+  "total_runs": 9,
+  "successful": 0,
+  "failed": 9,
+  "exceptions": 0,
+  "total_input_tokens_uncached": 474,
+  "total_input_tokens_cache_read": 3072,
+  "total_input_tokens_cache_creation": 0,
+  "total_input_tokens_all": 3546,
+  "total_output_tokens": 4618,
+  "total_estimated_cost_usd": 0.05910092699999999,
+  "by_baseline": {
+    "B2_TRUNCATED": {
+      "runs": 3,
+      "avg_input_tokens_uncached": 35.0,
+      "avg_total_input_tokens": 419.0,
+      "avg_output_tokens": 410.0,
+      "avg_evidence_recall": 0.0,
+      "task_success_rate": 0.0,
+      "avg_estimated_cost_usd": 0.000388629
+    },
+    "B3_SUMMARY": {
+      "runs": 3,
+      "avg_input_tokens_uncached": 122.0,
+      "avg_total_input_tokens": 378.0,
+      "avg_output_tokens": 659.0,
+      "avg_evidence_recall": 0.06666666666666667,
+      "task_success_rate": 0.0,
+      "avg_estimated_cost_usd": 0.0006375360000000001
+    },
+    "B3_LLM_SUMMARY": {
+      "runs": 3,
+      "avg_input_tokens_uncached": 1.0,
+      "avg_total_input_tokens": 385.0,
+      "avg_output_tokens": 470.3333333333333,
+      "avg_evidence_recall": 0.0,
+      "task_success_rate": 0.0,
+      "avg_estimated_cost_usd": 0.018674144
+    }
+  }
+}

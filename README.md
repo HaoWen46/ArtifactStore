@@ -35,7 +35,7 @@ through scoped queries when needed.
 
 The full system architecture (data model, API contract, evaluation, threat
 model, related work) is in [`report/architecture.pdf`](report/architecture.pdf)
-(28 pages). The authoritative spec is
+(29 pages). The authoritative spec is
 [`ArtifactStore_PLAN.md`](ArtifactStore_PLAN.md).
 
 ---
@@ -118,7 +118,7 @@ via `artifactstore audit`.
 ### Evaluation
 
 ```bash
-# §11.1 single-agent: 5 baselines × 5 fixtures × 3 reps = 75 runs, ~$0.16
+# §11.1 single-agent: 5 baselines × 6 fixtures × 3 reps = 90 runs, ~$0.30
 #   baselines: B1_RAW, B2_TRUNCATED, B3_SUMMARY (deterministic),
 #              B3_LLM_SUMMARY (real LLM summarizer), B4_ARTIFACT
 uv run python -m eval --reps 3
@@ -172,7 +172,7 @@ seen in practice before spending eval budget:
 
 ## Headline evaluation results
 
-Live evaluation against `deepseek-v4-pro` on 5 fixtures spanning 407–9,609
+Live evaluation against `deepseek-v4-pro` on 6 fixtures spanning 407–33,571
 raw tokens, plus 10 offline adversarial stress tests. **All result files
 (`result.jsonl`, `manifest.json`, `audit.csv`) are committed to
 [`eval/runs/`](eval/runs)** so reviewers can verify every number in this
@@ -192,29 +192,42 @@ table from the repo without re-spending API budget. Detailed analysis:
 > audit-log signal — survive at any n because they are dataset-level
 > properties, not statistical inferences.
 
-### §11.1 single-agent (n=15 per baseline, 75 runs total)
+### §11.1 single-agent (n=18 per baseline, 90 runs total)
 
 | baseline | task success | Wilson 95% CI | avg recall | avg tot tokens (in) | avg cost | latency |
 |---|---:|---:|---:|---:|---:|---:|
-| **B1** raw injection | 15/15 (100%) | [0.80, 1.00] | 0.93 | 3,144 | $0.0016 | 93 s |
-| **B2** truncated to 200 tok | 6/15 (40%) | [0.20, 0.64] | 0.36 | 347 | $0.0007 | 27 s |
-| **B3** offline summary (deterministic) | 6/15 (40%) | [0.20, 0.64] | 0.36 | 281 | $0.0008 | 31 s |
-| **B3'** LLM summary (real LLM call) | 7/15 (47%) | [0.25, 0.70] | 0.46 | 294 | $0.0026 | 23 s |
-| **B4** ArtifactStore | **12/15 (80%)** | [0.55, 0.93] | **0.82** | 17,944 | $0.0051 | 107 s |
+| **B1** raw injection | 17/18 (94%) | [0.74, 0.99] | 0.87 | 9,289 | $0.0028 | 85 s |
+| **B2** truncated to 200 tok | 6/18 (33%) | [0.16, 0.56] | 0.30 | 359 | $0.0007 | 25 s |
+| **B3** offline summary (deterministic) | 6/18 (33%) | [0.16, 0.56] | 0.31 | 298 | $0.0008 | 29 s |
+| **B3'** LLM summary (real LLM call) | 7/18 (39%) | [0.20, 0.61] | 0.38 | 309 | $0.0053 | 22 s |
+| **B4** ArtifactStore | **13/18 (72%)** | [0.49, 0.88] | **0.77** | 17,266 | $0.0050 | 99 s |
 
 > At fixture sizes ≥3.5K tokens, the summary baselines (B2/B3/B3') collapse
-> to ≤33% success and ≤0.33 recall; B1 and B4 both hold. **On the 9.6K
-> `pytest_ci_run` fixture in this rep set, B1 was 3/3 and B4 was 0/3** —
-> a swing within the per-cell Wilson CI bounds of [0.31, 1.00] and
-> [0.00, 0.56] that we do not call as a robust difference. The
-> *structural* B4 properties survive at any n: 0/45 B1/B2/B3/B3' runs
-> across the suite emit a well-formed `art_xxx/span_yyy` citation
-> because none of those baselines has a span store to cite into;
-> B4 emits avg 4.3 citations/run on the small fixtures, all resolve
-> through `cite.verify_resolves`. The audit-log surface is similar:
-> the §11.3 stress tests and §11.2 delegation runs together log
-> **0 unauthorized reads succeeded across 18 attack vectors**, all
-> with parseable `denial_reason` strings.
+> to ≤33% success and ≤0.33 recall; B1 and B4 both hold (with caveats on
+> the two largest fixtures — see McNemar table below). The **6th fixture
+> (`pytest_xl_run`, 33,571 raw tokens) was added at reviewer suggestion
+> to test the projected B1/B4 cost crossover** — B4's input plateaus at
+> 14K tokens regardless of fixture size while B1's grows linearly to
+> 41K, confirming the architectural prediction empirically.
+>
+> *Paired McNemar tests* over 18 fixture-rep pairs:
+>
+> | A vs B | both succ | A-only | B-only | both fail | p (2-sided) |
+> |---|---:|---:|---:|---:|---:|
+> | B4 vs B1_RAW | 13 | 0 | 4 | 1 | 0.125 |
+> | B4 vs B2_TRUNCATED | 6 | 7 | 0 | 5 | **0.016** |
+> | B4 vs B3_SUMMARY | 6 | 7 | 0 | 5 | **0.016** |
+> | B4 vs B3_LLM_SUMMARY | 6 | 7 | 1 | 4 | 0.070 |
+>
+> B4 *strictly* beats B2 and B3 (p<0.02); B4 vs B1 is undecided at n=18,
+> with the discordant pairs favoring B1 on the two largest fixtures.
+> *Structural* B4 properties survive at any n: 0/54 B1/B2/B3/B3' runs
+> emit a well-formed `art_xxx/span_yyy` citation because none of those
+> baselines has a span store; B4 emits avg 4.3 citations/run, all
+> resolve through `cite.verify_resolves`. The audit-log surface is
+> similar: §11.3 stress + §11.2 organic denials log **0 unauthorized
+> reads succeed across 18 attack vectors**, every denial with a
+> parseable `denial_reason`.
 
 ### §11.2 supervisor↔subagent delegation (n=15 per strategy, 60 runs total)
 
@@ -407,12 +420,13 @@ demo/                 ← the test bench (PLAN §20)
   runner.py           ← demo entrypoint + .env loader + --check-config / --verify-* probes
 eval/
   fixtures/           ← captured pytest/grep/git-diff outputs + .gold.json truth files
-                        Five fixtures span 407–9,609 raw tokens:
+                        Six fixtures span 407–33,571 raw tokens:
                           rg_grep_noise (407)
                           pytest_auth_expiry (444)
                           git_diff_auth_refactor (577)
                           pytest_large_run (3,480)
                           pytest_ci_run (9,609; generated by _gen_pytest_ci_run.py)
+                          pytest_xl_run (33,571; generated by _gen_pytest_xl_run.py)
   driver.py           ← PLAN §11.1 sweep: 5 baselines (B1/B2/B3/B3'/B4) × N fixtures × M reps
   delegation.py       ← PLAN §11.2 sweep: 4 strategies (D1/D1'/D2/D3) × N fixtures × M reps
   baselines.py        ← B1/B2/B3/B3_LLM/B4 setup builders; LLM-summary registry shares
@@ -423,7 +437,7 @@ eval/
                         per-run *.sqlite DBs gitignored as derivable
 report/
   architecture.typ    ← Typst source for the architecture report (cetz-plot for figures)
-  architecture.pdf    ← rendered (28 pages)
+  architecture.pdf    ← rendered (29 pages)
 notes/
   agent_design.md     ← research notes — canonical loop, hard rules, pitfalls
   eval_writeup.md     ← detailed eval analysis with per-fixture breakdown
