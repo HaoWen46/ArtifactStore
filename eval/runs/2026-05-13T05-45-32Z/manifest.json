@@ -1,0 +1,26 @@
+{
+  "started_at": "2026-05-13T05:45:32.080241+00:00",
+  "finished_at": "2026-05-13T05:53:36.214895+00:00",
+  "elapsed_seconds": 484.134654,
+  "total_runs": 12,
+  "successful": 6,
+  "failed": 6,
+  "exceptions": 0,
+  "total_input_tokens_uncached": 2054,
+  "total_input_tokens_cache_read": 1280,
+  "total_input_tokens_cache_creation": 0,
+  "total_input_tokens_all": 3334,
+  "total_output_tokens": 9038,
+  "total_estimated_cost_usd": 0.021831345,
+  "by_baseline": {
+    "B3_LLM_SUMMARY": {
+      "runs": 12,
+      "avg_input_tokens_uncached": 171.16666666666666,
+      "avg_total_input_tokens": 277.8333333333333,
+      "avg_output_tokens": 753.1666666666666,
+      "avg_evidence_recall": 0.4888888888888889,
+      "task_success_rate": 0.5,
+      "avg_estimated_cost_usd": 0.00181927875
+    }
+  }
+}

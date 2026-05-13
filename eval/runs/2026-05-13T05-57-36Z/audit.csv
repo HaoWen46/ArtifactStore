@@ -1,0 +1,8 @@
+run_id,access_id,grant_id,subject_agent_id,artifact_id,operation,view,timestamp,result_token_count,allowed,denial_reason
+pytest_ci_run__B4_ARTIFACT__rep0,acc_147cd450,grant_5af9932e,eval_agent,art_a7c97f92,get_spans,,2026-05-13T06:00:45.586044+00:00,560,1,
+pytest_ci_run__B4_ARTIFACT__rep1,acc_a38dc49f,grant_6bf29984,eval_agent,art_951fb0d8,get_spans,,2026-05-13T06:01:33.226701+00:00,560,1,
+pytest_ci_run__B4_ARTIFACT__rep1,acc_3137e05e,grant_6bf29984,eval_agent,art_951fb0d8,get_spans,,2026-05-13T06:02:22.529798+00:00,492,1,
+pytest_ci_run__B4_ARTIFACT__rep2,acc_9359ddc4,grant_5faf344b,eval_agent,art_c392e7c0,get_spans,,2026-05-13T06:02:50.509736+00:00,560,1,
+pytest_ci_run__B4_ARTIFACT__rep2,acc_2ba80b55,grant_5faf344b,eval_agent,art_c392e7c0,find_related,,2026-05-13T06:03:21.496549+00:00,0,1,
+pytest_ci_run__B4_ARTIFACT__rep2,acc_e5d238a9,grant_5faf344b,eval_agent,art_c392e7c0,expand_view,raw,2026-05-13T06:03:26.863445+00:00,2917,1,
+pytest_ci_run__B4_ARTIFACT__rep2,acc_f72a9fcf,grant_5faf344b,eval_agent,art_c392e7c0,get_spans,,2026-05-13T06:04:11.763317+00:00,492,1,

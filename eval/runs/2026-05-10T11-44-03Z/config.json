@@ -1,0 +1,26 @@
+{
+  "started_at": "2026-05-10T11:44:03.906979+00:00",
+  "model": "deepseek-v4-pro",
+  "base_url": "https://api.deepseek.com/anthropic",
+  "git_rev": "2d379bf5c1bf90d4b21c7dd7f11ca35fbe8c811b",
+  "fixtures": [
+    "pytest_large_run"
+  ],
+  "baselines": [
+    "B1_RAW",
+    "B2_TRUNCATED",
+    "B3_SUMMARY",
+    "B4_ARTIFACT"
+  ],
+  "reps": 3,
+  "max_turns": 10,
+  "fixture_registry": {
+    "pytest_large_run": {
+      "kind": "pytest",
+      "target": "auth_expiry",
+      "artifact_type": "pytest_failure",
+      "ext": ".log",
+      "reveal_target": false
+    }
+  }
+}

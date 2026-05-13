@@ -1,0 +1,35 @@
+{
+  "started_at": "2026-05-13T05:57:36.424815+00:00",
+  "finished_at": "2026-05-13T06:04:35.313858+00:00",
+  "elapsed_seconds": 418.889043,
+  "total_runs": 6,
+  "successful": 3,
+  "failed": 3,
+  "exceptions": 0,
+  "total_input_tokens_uncached": 16392,
+  "total_input_tokens_cache_read": 60672,
+  "total_input_tokens_cache_creation": 0,
+  "total_input_tokens_all": 77064,
+  "total_output_tokens": 13806,
+  "total_estimated_cost_usd": 0.021780972000000003,
+  "by_baseline": {
+    "B1_RAW": {
+      "runs": 3,
+      "avg_input_tokens_uncached": 115.0,
+      "avg_total_input_tokens": 10355.0,
+      "avg_output_tokens": 2041.0,
+      "avg_evidence_recall": 0.8666666666666667,
+      "task_success_rate": 1.0,
+      "avg_estimated_cost_usd": 0.002271135
+    },
+    "B4_ARTIFACT": {
+      "runs": 3,
+      "avg_input_tokens_uncached": 5349.0,
+      "avg_total_input_tokens": 15333.0,
+      "avg_output_tokens": 2561.0,
+      "avg_evidence_recall": 0.3333333333333333,
+      "task_success_rate": 0.0,
+      "avg_estimated_cost_usd": 0.004989189000000001
+    }
+  }
+}

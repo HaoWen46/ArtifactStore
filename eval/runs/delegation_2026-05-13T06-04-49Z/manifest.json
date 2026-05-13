@@ -1,0 +1,28 @@
+{
+  "mode": "delegation",
+  "started_at": "2026-05-13T06:04:49.521870+00:00",
+  "finished_at": "2026-05-13T06:20:46.611480+00:00",
+  "elapsed_seconds": 957.08961,
+  "total_runs": 12,
+  "successful": 8,
+  "failed": 4,
+  "exceptions": 0,
+  "total_parent_input_tokens": 37042,
+  "total_sub_input_tokens": 5126,
+  "total_output_tokens": 24932,
+  "total_estimated_cost_usd": 0.041453499,
+  "by_strategy": {
+    "D1_LLM_SUMMARY": {
+      "runs": 12,
+      "avg_parent_total_input": 3086.8333333333335,
+      "avg_sub_total_input": 427.1666666666667,
+      "avg_total_input": 3514.0,
+      "avg_total_output": 2077.6666666666665,
+      "avg_evidence_recall": 0.6333333333333333,
+      "task_success_rate": 0.6666666666666666,
+      "avg_citations": 0.0,
+      "avg_citation_validity": 0.0,
+      "avg_estimated_cost_usd": 0.00345445825
+    }
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "mode": "delegation",
+  "started_at": "2026-05-09T18:39:54.539202+00:00",
+  "finished_at": "2026-05-10T04:27:42.650837+00:00",
+  "elapsed_seconds": 35268.111635,
+  "total_runs": 36,
+  "successful": 29,
+  "failed": 7,
+  "exceptions": 0,
+  "total_parent_input_tokens": 184419,
+  "total_sub_input_tokens": 350439,
+  "total_output_tokens": 134293,
+  "total_estimated_cost_usd": 0.188337948,
+  "by_strategy": {
+    "D1_SUMMARY": {
+      "runs": 12,
+      "avg_parent_total_input": 3064.5833333333335,
+      "avg_sub_total_input": 402.0,
+      "avg_total_input": 3466.5833333333335,
+      "avg_total_output": 2184.1666666666665,
+      "avg_evidence_recall": 0.5,
+      "task_success_rate": 0.4166666666666667,
+      "avg_citations": 0.0,
+      "avg_citation_validity": 0.0,
+      "avg_estimated_cost_usd": 0.00247276475
+    },
+    "D2_FULL_CONTEXT": {
+      "runs": 12,
+      "avg_parent_total_input": 6009.833333333333,
+      "avg_sub_total_input": 1664.0,
+      "avg_total_input": 7673.833333333333,
+      "avg_total_output": 2871.0,
+      "avg_evidence_recall": 0.9277777777777777,
+      "task_success_rate": 1.0,
+      "avg_citations": 0.0,
+      "avg_citation_validity": 0.0,
+      "avg_estimated_cost_usd": 0.0042072475
+    },
+    "D3_SCOPED": {
+      "runs": 12,
+      "avg_parent_total_input": 6293.833333333333,
+      "avg_sub_total_input": 27137.25,
+      "avg_total_input": 33431.083333333336,
+      "avg_total_output": 6135.916666666667,
+      "avg_evidence_recall": 0.9222222222222222,
+      "task_success_rate": 1.0,
+      "avg_citations": 6.416666666666667,
+      "avg_citation_validity": 0.9166666666666666,
+      "avg_estimated_cost_usd": 0.00901481675
+    }
+  }
+}

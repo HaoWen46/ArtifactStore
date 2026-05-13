@@ -1,0 +1,27 @@
+{
+  "mode": "delegation",
+  "started_at": "2026-05-13T06:21:26.918215+00:00",
+  "model": "deepseek-v4-pro",
+  "base_url": "https://api.deepseek.com/anthropic",
+  "git_rev": "475900d9638b0e2b37ce9fe929107454fb23d19a",
+  "fixtures": [
+    "pytest_ci_run"
+  ],
+  "strategies": [
+    "D1_SUMMARY",
+    "D1_LLM_SUMMARY",
+    "D2_FULL_CONTEXT",
+    "D3_SCOPED"
+  ],
+  "reps": 3,
+  "max_turns": 10,
+  "fixture_registry": {
+    "pytest_ci_run": {
+      "kind": "pytest",
+      "target": "auth_expiry",
+      "artifact_type": "pytest_failure",
+      "ext": ".log",
+      "reveal_target": false
+    }
+  }
+}

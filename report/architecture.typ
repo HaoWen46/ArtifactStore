@@ -67,34 +67,59 @@ its transcript and delegates inspection to a subagent under a scoped grant;
 the subagent retrieves exact evidence through controlled tool calls and
 returns a report with formal citations the supervisor can verify.
 
+*Novelty positioning*: agent-memory systems like *MemGPT* / *Letta* and
+*LangGraph checkpointers* persist intermediate state across turns but expose
+it as freeform text with no typed span, no citation primitive, and no
+per-read access surface. Capability-based access control (Dennis & Van Horn,
+1966; *seL4*, *Capsicum*) and row-level security (Postgres RLS, Oracle VPD)
+are mature in OS and DBMS contexts but are not applied to agent tool
+outputs. The contribution is not any one of these layers but the
+recombination — typed evidence spans, capability-scoped reads, span-level
+citations, and append-only audit logs in a single substrate sized for an
+agent-harness use case, where the runtime (not the LLM) is the policy
+enforcer.
+
+*Scope of the empirical claims*: live evaluation is 132 runs against one
+provider class (DeepSeek V4 Pro through the Anthropic-compatible Messages
+endpoint) on five captured fixtures spanning 407–9,609 raw tokens, 3 reps
+per (fixture × baseline) cell at `temperature=1.0`. The 9.6K fixture has
+n=3 per cell with wide Wilson 95% CIs (e.g., `[0.21, 0.94]` for 2/3); the
+structural claims (only B4/D3 produce verifiable citations and audit-log
+signal) hold by construction, not by reps. We have not run a second model
+class or a larger long-context fixture (≥30K tokens); both are flagged as
+limitations rather than future work.
+
+Headline results within those bounds: §11.1 single-agent (5 fixtures × 5
+baselines × 3 reps = 75 runs) shows B4 (ArtifactStore) reaches 12/15
+(80%, Wilson 95% CI [0.55, 0.93]) task success and 0.82 avg evidence
+recall across the suite; B1 (raw injection) ties at 15/15 (100%, CI
+[0.80, 1.00]) — *no statistically defensible claim that B1 or B4 has
+an aggregate edge at n=15*. The robust empirical claim is that the
+summary baselines (B2/B3/B3') collapse to ≤47% suite-wide success and
+to 0–33% on the two fixtures ≥3.5 K raw tokens, while B1 and B4 hold.
+§11.2 supervisor↔subagent (5 fixtures × 4 strategies × 3 reps = 60 runs)
+shows D3 (scoped ArtifactStore delegation) holds parent context
+bounded at ~6 K tokens even on the 9.6 K fixture (D2 balloons to ~25 K
+in fresh runs — confirmed within ±3% of the prior draft's number).
+§11.3 adversarial stress (10 offline scenarios) shows zero unauthorized
+reads succeed. A real LLM-summary baseline B3'/D1' was added at
+reviewer request and does *not* beat deterministic B3/D1 on
+evidence-recall at this prototype's summarizer budget — but the
+*structural* advantages of B4/D3 (citation verifiability, audit-log
+signal, span-aware selective redaction) survive any summary quality
+and are the load-bearing claim of this report.
+
 Implementation: ~2.0 kLOC of Python on SQLite + FTS5, plus a ~150 LOC
-client-side tool-use loop. The same harness runs against Anthropic-native and
-Anthropic-API-compatible endpoints (DeepSeek V4 Pro by default; ~10× cheaper
-at parity behavior). 171 tests pass — unit, integration, offline e2e, CLI
-integration (subprocess and in-process), adversarial stress, eval-baseline
-unit tests, FTS5-fallback robustness, and review-driven regression tests
-for self-review-discovered weaknesses (long-line truncation, sensitivity
-self-labeling bypass, fence-post budget enforcement, citation case-handling).
-A target-leak control sweep confirms the eval's headline numbers are
-robust to whether the agent is told which failure to focus on. Live
-evaluation: 135 runs across four sweeps on five fixtures (407–9,609 raw
-tokens). §11.1 single-agent (5 fixtures × 5 baselines × 3 reps) shows
-B4 (ArtifactStore) achieves 93% task success and 0.90 avg evidence
-recall — the only baseline above 50% success on the 9.6K-token CI-log
-fixture, where B1 (raw injection) drops to 33% and the summary baselines
-(B2/B3/B3') drop to 0%. §11.2 supervisor↔subagent (5 fixtures × 4
-strategies × 3 reps) shows D3 (scoped ArtifactStore delegation) holds
-parent context bounded at ~6K tokens even on the 9.6K fixture (D2
-balloons to 25K), and is the only delegation strategy that produces
-structurally verifiable citations and audit-log signal. §11.3
-adversarial stress (10 offline scenarios) shows zero unauthorized reads
-succeed. We also report a *real LLM-summary baseline* (B3'/D1'): under
-DeepSeek V4 Pro it does not beat the deterministic B3/D1 on
-evidence-recall (B3' avg recall 0.27 vs B3 0.39 across the suite) and
-trivially does not produce citations or audit log — the structural
-advantage argument (§8.7) is empirically confirmed rather than just
-argued. Remaining caveats: three reps at `temperature=1.0` give
-wide confidence bands, and the live sweep targets one provider class.
+client-side tool-use loop. The same harness runs against Anthropic-native
+and Anthropic-API-compatible endpoints (DeepSeek V4 Pro by default;
+~10× cheaper at parity behavior). 171 tests pass — unit, integration,
+offline e2e, CLI integration (subprocess and in-process), adversarial
+stress, eval-baseline unit tests, FTS5-fallback robustness, and
+review-driven regression tests for self-review-discovered weaknesses
+(long-line truncation, sensitivity self-labeling bypass, fence-post
+budget enforcement, citation case-handling). A target-leak control
+sweep confirms the eval's headline numbers are robust to whether the
+agent is told which failure to focus on.
 
 = Motivation and Thesis
 
@@ -534,29 +559,37 @@ context-injection strategies (including a real LLM-summary baseline, B3').
 == Aggregate (n=15 per baseline, across 5 fixtures spanning 407–9,609 raw tokens)
 
 #table(
-  columns: (auto, auto, auto, auto, auto, auto),
+  columns: (auto, auto, auto, auto, auto, auto, auto),
   inset: 5pt,
   stroke: 0.5pt + rgb("#cccccc"),
-  align: (left, right, right, right, right, right),
+  align: (left, right, right, right, right, right, right),
   table.header(
-    [*Baseline*], [*success*], [*avg_recall*], [*avg_tot_in*], [*avg_out*], [*avg_cost*],
+    [*Baseline*], [*success*], [*Wilson 95% CI*], [*recall*], [*tot_in*], [*cost*], [*latency*],
   ),
-  [B1 RAW],            [87%], [0.82], [3,144],  [1,448], [\$0.0019],
-  [B2 TRUNCATED],      [40%], [0.36], [347],    [821],   [\$0.0008],
-  [B3 SUMMARY (det.)], [40%], [0.39], [281],    [877],   [\$0.0008],
-  [B3' LLM_SUMMARY],   [20%], [0.27], [294],    [1,019], [\$0.0028],
-  [*B4 ARTIFACT*], [*93%*], [*0.90*], [*19,806*], [*2,989*], [*\$0.0048*],
+  [B1 RAW],            [15/15 (100%)], [[0.80, 1.00]], [0.93], [3,144],  [\$0.0016], [93 s],
+  [B2 TRUNCATED],      [6/15 (40%)],   [[0.20, 0.64]], [0.36], [347],    [\$0.0007], [27 s],
+  [B3 SUMMARY (det.)], [6/15 (40%)],   [[0.20, 0.64]], [0.36], [281],    [\$0.0008], [31 s],
+  [B3' LLM_SUMMARY],   [7/15 (47%)],   [[0.25, 0.70]], [0.46], [294],    [\$0.0026], [23 s],
+  [*B4 ARTIFACT*], [*12/15 (80%)*], [[0.55, 0.93]], [*0.82*], [*17,944*], [*\$0.0051*], [*107 s*],
 )
 
-Notable shifts vs the earlier 4-fixture report: B1's success drops from
-100% to 87% when the 9.6K CI fixture is included — the model fails on
-1 in 3 reps of `pytest_ci_run` because the auth_expiry WARNING gets
-buried in the noise. B4's success holds at 93% (1 failed rep on
-pytest_ci_run, otherwise perfect). The new B3' (LLM-summary) baseline
-performs *worse* than deterministic B3 in this evaluation: at 9.6K
-tokens the LLM summarizer compresses the input down to ~250 tokens and
-the diagnostic WARNING line disappears entirely (B3' recall = 0.00 on
-pytest_ci_run).
+Reading the table: the Wilson 95% CIs are wide because n=15 per cell
+(3 reps × 5 fixtures). B1 RAW and B4 ARTIFACT both have CIs that
+overlap heavily — no headline numerical conclusion about which is
+"better on average" is statistically defensible at this n. What the
+data does support, by inspection of the per-fixture cells below, is
+fixture-dependent ranking: B2/B3/B3' summary baselines collapse to 0%
+success at the 9.6K-token fixture and at `pytest_large_run`, while
+B1 and B4 both hold up.
+
+Three things to flag against the previous draft's numbers, which were
+computed against an earlier (uncommitted) sweep: B1's per-suite success
+rose from 87% to 100% in the now-committed sweep, B4 fell from 93% to
+80% (driven entirely by 0/3 on `pytest_ci_run` in this rep set), and
+B3'/B3' rose from 20% to 47%. These are within Wilson CI of the prior
+numbers — exactly the kind of rep-noise the *Limitations* section
+flags. The structural claims (citations, audit, redaction) survive at
+any rep count.
 
 #figure(
   cetz.canvas({
@@ -595,21 +628,28 @@ pytest_ci_run).
 
 #v(0.5em)
 
-In this evaluation, B4 leads on every per-fixture cell except `rg_grep_noise`
-where it ties B1 at 100%. The headline non-trivial finding is the
-9.6K-token `pytest_ci_run` fixture: B4 holds 67% success and 0.73
-recall while B1 drops to 33% / 0.33, B2/B3/B3' collapse to 0% / ≤0.13.
-At this fixture size the diagnostic WARNING is the only signal worth
-finding among ~700 test results, and only the artifact-store approach
-(typed spans + indexed search) reliably locates it. B4 is also the only
-baseline that produces formally verifiable citations (avg 4.3/run on the
-small fixtures, 4/4 on the one successful pytest_ci_run rep). B2/B3/B3'
-fail in fixture-dependent ways: B2 loses anything past its truncation
-cap; B3 (deterministic) preserves WARNING lines but loses hunk-level
-diff structure; *B3' (LLM-summary) compresses too aggressively at 10K
-and loses the WARNING entirely* — recall drops to 0.00 on the new
-fixture, validating the structural-advantages argument
-(§8.7 below) empirically rather than just by argument.
+In the per-fixture breakdown, B1 and B4 are tied at 3/3 success on every
+fixture except `pytest_ci_run`, where the rep set in this evaluation
+gave B1 3/3 and B4 0/3 — a swing that the per-cell Wilson 95% CIs
+[0.31, 1.00] and [0.00, 0.56] do not separate. On the 9.6K fixture, B4's
+agent spent more turns exploring spans (avg 3.3 turns vs B1's 1 turn)
+and reached evidence recall 0.33 on every rep — *partial diagnosis*
+that fell below the 0.5 success threshold; B1's single-turn read of
+the whole fixture happened to surface the auth_expiry WARNING in all
+three reps. The cells where summary baselines clearly collapse are
+`pytest_large_run` (3.5K) and `pytest_ci_run` (9.6K), where B2/B3
+drop to 0% success and 0.0–0.2 recall. B3' (LLM-summary) is also at
+0% success on the 3.5K and 9.6K fixtures and 33% on 9.6K with 0.33
+recall — the LLM summarizer compresses the input down to ~250 tokens
+and the diagnostic WARNING line disappears.
+
+Within this single rep set, the empirical winner on the 9.6K fixture
+is B1, not B4. We do not draw a strong "B4 wins on large fixtures"
+conclusion from n=3 reps. What the per-cell data does support — and
+the report leans on going forward — is that the *structural*
+properties of B4/D3 (citation verifiability, audit-log signal,
+selective redaction; see §8.7) are independent of the rep count
+because they are dataset-level outputs, not LLM behaviours.
 
 == Where ArtifactStore wins
 
@@ -638,31 +678,39 @@ fixture, validating the structural-advantages argument
 
 == Where ArtifactStore is honest about its costs
 
-PLAN §14 predicted 30–60% fewer prompt tokens for B4 versus raw injection.
-On the 5-fixture suite, average B4 input is ~6.3× average B1 input
-(19,806 vs 3,144), because multi-turn loops accumulate context across
-turns. Three fairer framings expose where ArtifactStore actually pays
-for itself:
+PLAN §14 predicted 30–60% fewer prompt tokens for B4 versus raw
+injection. *On this suite, that prediction does not hold.* Average B4
+input across the 5 fixtures is ~5.7× average B1 input (17,944 vs 3,144
+tokens) because the multi-turn tool-use loop accumulates context across
+turns. The real shape that B4 buys is a *plateau* rather than a
+linear-growth curve: past ~3 K raw tokens, B4's total input flattens
+around 13-18 K (the model needs at most 3-5 search/expand calls
+regardless of fixture size), while B1's grows linearly with the raw
+payload it pastes in once. B1 and B4 cross around 30 K raw tokens —
+past the largest fixture we ran.
+
+Three honest framings of the cost story:
 
 - *Cost crossover*: B1's per-fixture cost rises with fixture size from
-  \$0.0009 → \$0.0035; B4's flattens around \$0.0035-\$0.0037 past
-  3K tokens. At the 9.6K-token `pytest_ci_run` fixture, B1 and B4 cost
-  within 6% of each other (\$0.0035 vs \$0.0037), yet B4's success is
-  2× higher (67% vs 33%) and its evidence recall 2.2× higher (0.73 vs
-  0.33).
-- *Cost-per-success on the large fixture*: B1 \$0.0035 / 33% = \$0.011
-  per correct diagnosis; B4 \$0.0037 / 67% = \$0.0055. B2/B3/B3' are
-  all 0% on this fixture so cost-per-success is undefined. *On the
-  9.6K fixture, B4 is the cheapest baseline measured in dollars-per-
-  correct-diagnosis.*
-- *Headline framing*: ArtifactStore is *not* the cheapest baseline on
-  the small fixtures (4 of 5 fixtures). On the 9.6K-token CI fixture it
-  is both the most accurate (67% succ, EER=1.00 on successful reps) and
-  the most cost-effective per correct diagnosis. Across the suite it is
-  the only configuration that produces formal evidence citations and
-  audit-log signal — properties the *Structural advantages* subsection
-  below confirms are structural, not artifacts of the B3 baseline being
-  deterministic.
+  \$0.0009 → \$0.0025 (and would keep growing); B4's plateaus around
+  \$0.0032-\$0.0051 past 3K tokens. At the 9.6K-token
+  `pytest_ci_run` fixture, B1 was \$0.0023 and B4 was \$0.0050 —
+  B1 was *cheaper* in this rep set, not more expensive. The eventual
+  B4-cheaper regime is projected to start past ~30 K raw tokens; we
+  did not run a fixture that large.
+- *Cost-per-success* on the 9.6K fixture: B1 \$0.0023 / 100% =
+  \$0.0023 per correct diagnosis; B4 \$0.0050 / 0% = undefined. *B1
+  is cheaper per correct diagnosis on this fixture in this rep set*.
+  B2/B3/B3' are all 0% so their cost-per-success is also undefined.
+  We do not report "B4 wins cost-per-success" as a headline.
+- *Where B4 actually pays for itself*: not by being cheaper in
+  raw dollars on these fixtures, but by being the only configuration
+  that produces formal evidence citations and per-read audit signal
+  — structural properties (§8.7) that survive any rep luck. On
+  workflows where exact evidence recovery, citation verifiability, or
+  permission scoping matter, B4 buys those properties at a 2-3×
+  per-task cost premium on small fixtures, dropping toward parity
+  with B1 by the 9.6K fixture.
 
 #figure(
   cetz.canvas({
@@ -676,31 +724,127 @@ for itself:
       x-min: 0, x-max: 10000,
       legend: "inner-north-east",
       {
-        plot.add(((407,1.3),(444,1.3),(577,0.9),(3480,2.5),(9609,3.5)),
-          label: [B1 RAW (succ 100/100/100/100/33%)], mark: "o")
-        plot.add(((407,0.9),(444,0.6),(577,0.9),(3480,0.8),(9609,0.6)),
+        plot.add(((407,1.3),(444,1.3),(577,0.9),(3480,2.5),(9609,2.3)),
+          label: [B1 RAW (succ 100/100/100/100/100%)], mark: "o")
+        plot.add(((407,0.9),(444,0.6),(577,0.9),(3480,0.8),(9609,0.4)),
           label: [B2 TRUNCATED (100/0/100/0/0%)], mark: "x")
-        plot.add(((407,1.3),(444,0.7),(577,1.0),(3480,0.5),(9609,0.6)),
+        plot.add(((407,1.3),(444,0.7),(577,1.0),(3480,0.5),(9609,0.7)),
           label: [B3 SUMMARY (100/100/0/0/0%)], mark: "triangle")
-        plot.add(((407,1.8),(444,2.9),(577,1.6),(3480,2.6),(9609,5.3)),
-          label: [B3' LLM_SUMMARY (33/67/0/0/0%)], mark: "diamond")
-        plot.add(((407,10.0),(444,4.1),(577,3.2),(3480,3.2),(9609,3.7)),
-          label: [B4 ARTIFACT (100/100/100/100/67%)], mark: "square")
+        plot.add(((407,1.6),(444,1.7),(577,1.5),(3480,2.5),(9609,5.6)),
+          label: [B3' LLM_SUMMARY (67/100/33/0/33%)], mark: "diamond")
+        plot.add(((407,10.0),(444,4.1),(577,3.2),(3480,3.2),(9609,5.0)),
+          label: [B4 ARTIFACT (100/100/100/100/0%)], mark: "square")
       })
   }),
-  caption: [Cost vs fixture size, with per-fixture success rate in the
-    legend (order: rg_grep_noise / pytest_auth_expiry /
-    git_diff_auth_refactor / pytest_large_run / pytest_ci_run). Y-axis
-    is tenths of a cent (e.g., 3.2 = \$0.0032). At 9.6K tokens, B4
-    (\$0.0037, 67% succ) is comparable to B1 (\$0.0035, 33% succ) on
-    raw cost but with 2× the success rate. The LLM-summary B3' is
-    *more expensive than B4* on the 9.6K fixture (\$0.0053 vs \$0.0037)
-    because the summarizer call scales with input size — and it gets
-    0% success. Cost-per-correct-diagnosis (cost ÷ success) for the
-    9.6K fixture: B1 \$0.0035/33% = \$0.0106 per success; B4
-    \$0.0037/67% = \$0.0055 per success — B4 wins by ~2× even on raw
-    cost-effectiveness here.],
+  caption: [Cost vs fixture size, with per-fixture success rate (n=3)
+    in the legend, order: rg_grep_noise / pytest_auth_expiry /
+    git_diff_auth_refactor / pytest_large_run / pytest_ci_run. Y-axis
+    is tenths of a cent (e.g., 3.2 = \$0.0032). On the 9.6K fixture,
+    B1 actually outperformed B4 in this rep set (3/3 vs 0/3) at
+    comparable cost (\$0.0023 vs \$0.0050). The LLM-summary B3' is
+    *more expensive than B4* on the 9.6K fixture (\$0.0056 vs \$0.0050)
+    because the summarizer call scales with input size — and B3'
+    succeeded only 1/3. The plot's takeaway is that at n=3 reps,
+    *no per-fixture pair-wise cost-effectiveness ranking between B1,
+    B4, and B3' on the largest fixture is statistically supported* —
+    the rep-noise dominates. The robust claim is the curves'
+    *shape*: B1's cost rises roughly linearly with fixture size,
+    while B4's plateaus around 3-4 tenths of a cent past 3K tokens
+    (it does not pay for re-reading the fixture each turn).],
 )
+
+=== Wall-clock latency (cost beyond tokens)
+
+Token cost is the headline number, but reviewers asked about end-to-end
+wall-clock — relevant for interactive flows. Per-fixture mean latency
+(elapsed seconds per rep, n=3 per cell, computed from the same runs
+that produced the cost table):
+
+#table(
+  columns: (auto, auto, auto, auto, auto, auto),
+  inset: 5pt,
+  stroke: 0.5pt + rgb("#cccccc"),
+  align: (left, right, right, right, right, right),
+  table.header(
+    [*Fixture (raw tok)*], [*B1*], [*B2*], [*B3*], [*B3'*], [*B4*],
+  ),
+  [rg_grep_noise (407)],     [49 s], [33 s], [50 s], [27 s], [245 s],
+  [pytest_auth_expiry (444)], [48 s], [25 s], [26 s], [33 s], [105 s],
+  [git_diff_auth_refactor (577)], [31 s], [34 s], [37 s], [23 s], [56 s],
+  [pytest_large_run (3,480)], [276 s], [30 s], [19 s], [14 s], [53 s],
+  [pytest_ci_run (9,609)],   [62 s], [15 s], [23 s], [20 s], [78 s],
+)
+
+Two observations:
+
+#list(
+  marker: ([▸], [·]),
+  spacing: 5pt,
+  [*B4's wall-clock dominates on small fixtures*. On
+    `rg_grep_noise` (407 tok), B4 is ~5× B1 — the multi-turn
+    tool-use loop pays a per-round-trip cost the small fixture
+    cannot amortize.],
+  [*B1's wall-clock dominates on a 3.5K-token multi-failure
+    fixture* (`pytest_large_run`: 276 s vs B4's 53 s). The model
+    receives 3,575 tokens up-front, makes one long turn,
+    generates a multi-paragraph diagnosis — while B4 reads a
+    preview, runs one targeted search, and writes a short
+    diagnosis. *Past ~3K raw tokens the latency story flips in
+    B4's favour* in this evaluation. On the 9.6K fixture B4 is
+    78 s vs B1's 62 s — back to comparable.],
+)
+
+For interactive flows where p50 latency matters more than total
+tokens, the right pick is fixture-size-dependent: B1 below ~1 K
+tokens, B4 above ~3 K tokens, neither has a robust advantage
+in between. The summary baselines (B2/B3/B3') are always
+fastest because they make one short call regardless of fixture
+size, but their low success rates make their latency
+advantage moot above 3K tokens.
+
+=== When ArtifactStore is the wrong choice
+
+Headline tables aside, the substrate has real costs that make it the wrong
+default for several scenarios. Naming them explicitly:
+
+#list(
+  marker: ([▸], [·]),
+  spacing: 5pt,
+  [*Single-shot tool results under \~1 K tokens*. B1 (raw injection)
+    delivers parity success at ~3× lower cost on every fixture below
+    3K raw tokens (`rg_grep_noise`, `pytest_auth_expiry`,
+    `git_diff_auth_refactor`). The multi-turn tool-use loop in B4
+    accumulates context across turns; for small outputs the
+    accumulation dominates and there is no payoff for the typed-span
+    machinery. *Use ArtifactStore only when raw outputs are expected
+    to exceed a few K tokens, or when permission scoping / auditability
+    is required by the surrounding application.*],
+  [*Single-agent workflows that don't delegate*. The largest D3 wins
+    come from bounding the supervisor's parent context while the
+    subagent does the actual exploration. In a single-agent flow,
+    there is no parent to protect and B4's gain reduces to "the
+    preview is span-aware" — useful but small. The strongest
+    motivation is supervisor↔subagent decomposition.],
+  [*Disposable / non-reproducible tool outputs*. The substrate's
+    audit log, lineage, and immutable raw store cost a per-`put`
+    transaction. If the tool output is non-sensitive, will not be
+    cited, and will not be re-read by another agent later, the
+    overhead is unjustified — a transient in-memory buffer is fine.],
+  [*Latency-tight interactive loops*. On the suite's largest fixture,
+    D3 wall-clock is ~3-4× D2 (the subagent makes more round-trips).
+    For interactive REPLs where p50 latency matters more than total
+    tokens, D2 or B1 are better choices.],
+  [*Workloads with frequent fixture re-ingestion*. We do not currently
+    deduplicate at write time even though `raw_hash` is computed
+    (§14, future work). A workload that re-puts the same artifact 100
+    times will create 100 rows. Mitigation: caller-side dedup, or
+    enabling content-addressable insert.],
+)
+
+The contribution is specifically scoped: typed evidence + permission
+scoping + audit at a substrate level, paying off when artifacts are
+large, delegation is happening, or auditability is a hard requirement.
+Outside that envelope, simpler context strategies dominate.
 
 === Robustness to target hint (target-leak control)
 
@@ -747,24 +891,25 @@ strategy works for a single agent" but "when delegating, what does the
   stroke: 0.5pt + rgb("#cccccc"),
   align: (left, right, right, right, right, right, right),
   table.header(
-    [*Strategy*], [*succ*], [*recall*], [*par_in*], [*sub_in*], [*tot_in*], [*cost*],
+    [*Strategy*], [*succ (95% CI)*], [*recall*], [*par_in*], [*sub_in*], [*cost*], [*lat*],
   ),
-  [D1 SUMMARY (det.)],  [33%], [0.41], [3,137], [451],    [3,589],  [\$0.0024],
-  [D1' LLM_SUMMARY],   [47%], [0.44], [3,245], [503],    [3,748],  [\$0.0043],
-  [D2 FULL_CONTEXT],   [87%], [0.85], [9,788], [3,477],  [13,265], [\$0.0059],
-  [*D3 SCOPED*], [*87%*], [*0.80*], [*6,307*], [*33,322*], [*39,628*], [*\$0.0094*],
+  [D1 SUMMARY (det.)],  [5/15 (33%) [0.15,0.58]], [0.43], [3,156], [455],    [\$0.0025], [42 s],
+  [D1' LLM_SUMMARY],   [8/15 (53%) [0.30,0.75]], [0.51], [3,440], [471],    [\$0.0042], [54 s],
+  [D2 FULL_CONTEXT],   [14/15 (93%) [0.70,0.99]], [0.88], [9,776], [3,472], [\$0.0063], [101 s],
+  [*D3 SCOPED*], [*12/15 (80%) [0.55,0.93]*], [*0.75*], [*6,316*], [*33,314*], [\$0.0094], [205 s],
 )
 
 Headline §11.2 finding: *D3's parent-context savings are conditional on
 fixture size, and the gap widens with scale*. On the `pytest_large_run`
 fixture (3,480 tok raw), D3 parent input = 6,708 vs D2's 11,716 — D3
-cuts parent context by 43%. On the 9.6K `pytest_ci_run` fixture, D3's
-parent = 6,358 vs D2's 24,901 — *D3 cuts parent context by 74%*. D3's
-parent input is essentially flat (~6K tokens) regardless of fixture
-size because the parent only handles handles and citations; D2's parent
-grows linearly with the payload it forwards. On small fixtures (~few
-hundred tok raw), D3's parent is larger than D2's because D3 makes 3
-LLM calls vs D2's 2, and per-turn overhead exceeds per-payload savings.
+cuts parent context by 43%. On the 9.6K `pytest_ci_run` fixture, fresh
+runs put D3's parent at ~6,200-6,700 tokens vs D2's ~24,800 — *D3 cuts
+parent context by ~75%*. D3's parent input is essentially flat (~6 K
+tokens) regardless of fixture size because the parent only handles
+handles and citations; D2's parent grows linearly with the payload it
+forwards. On small fixtures (~few hundred tok raw), D3's parent is
+larger than D2's because D3 makes 3 LLM calls vs D2's 2, and per-turn
+overhead exceeds per-payload savings.
 *The crossover sits around 3-4K raw tokens; the empirical gap reaches
 ~4× past 9K tokens.*
 
@@ -779,47 +924,60 @@ LLM calls vs D2's 2, and per-turn overhead exceeds per-payload savings.
       x-min: 0, x-max: 10000,
       legend: "inner-north-west",
       {
-        plot.add(((407,2992),(444,3161),(577,3019),(3480,3086),(9609,3428)),
+        plot.add(((407,2992),(444,3161),(577,3019),(3480,3086),(9609,3521)),
           label: [D1 SUMMARY (det.)], mark: "o")
-        plot.add(((407,3039),(444,3341),(577,3156),(3480,3310),(9609,3382)),
+        plot.add(((407,3229),(444,3101),(577,2884),(3480,3134),(9609,4851)),
           label: [D1' LLM_SUMMARY], mark: "diamond")
-        plot.add(((407,3490),(444,4174),(577,4659),(3480,11716),(9609,24901)),
+        plot.add(((407,3490),(444,4174),(577,4659),(3480,11716),(9609,24842)),
           label: [D2 FULL_CONTEXT], mark: "x")
-        plot.add(((407,6468),(444,5884),(577,6116),(3480,6708),(9609,6358)),
+        plot.add(((407,6468),(444,5884),(577,6116),(3480,6708),(9609,6404)),
           label: [D3 SCOPED], mark: "square")
       })
   }),
-  caption: [Parent-context crossover, extended to 5 fixtures. D2's
-    parent input scales roughly linearly with the fixture (the
-    supervisor inlines the raw payload before delegating); D3's stays
-    flat at ~6K tokens because the parent forwards only an artifact
-    handle. D1/D1' stay low but lose the evidence behind the summary
-    (D1 succ 33%, D1' succ 47%). The D2/D3 crossover sits between
-    the 577-token `git_diff_auth_refactor` fixture and the 3.5K-token
-    `pytest_large_run` fixture; by 9.6K tokens, D3's parent input is
-    *74% smaller* than D2's (6,358 vs 24,901), and D3 retains citation
-    verifiability + audit-log signal that D1/D1'/D2 cannot offer.],
+  caption: [Parent-context crossover, n=3 per cell. D2's parent input
+    scales roughly linearly with the fixture (the supervisor inlines
+    the raw payload before delegating); D3's stays flat at ~6 K
+    tokens because the parent forwards only an artifact handle.
+    D1/D1' stay low but lose the evidence behind the summary
+    (D1 succ 33%, D1' succ 53% over n=15). The D2/D3 crossover sits
+    between `git_diff_auth_refactor` (577 tok, D3 33% larger than D2)
+    and `pytest_large_run` (3.5 K, D3 43% smaller than D2). At 9.6 K
+    tokens, D3's parent input is *74% smaller* than D2's
+    (6,404 vs 24,842) — confirmed within ±1% of the prior draft's
+    numbers — and D3 retains citation verifiability + audit-log
+    signal that D1/D1'/D2 cannot offer. *Task success at 9.6 K
+    flipped this rep set*: D2 = 2/3 succ, D3 = 0/3 succ (subagent
+    over-explored and hit `max_turns`). The parent-context bound
+    holds at any rep count because it is a per-message property;
+    success rate is a model-behavior property and varies with reps.],
 )
 
 D3 is also the only strategy in this evaluation that produces formal
 citations (avg 5.8 per run on successful reps, all resolve) and surfaces
-RQ4 signal organically (5 unauthorized reads blocked across 15 D3 runs;
-0 in D1/D1'/D2 because they have no permission surface — a structural
-property of the design rather than a comparison artifact). The cost
-penalty over D2 is ~1.6× on the suite average — buying formal citations,
-audit signal, and bounded-parent-context.
+RQ4 signal organically. This is structural: D1/D1'/D2 have no
+permission surface to instrument (the supervisor never makes
+`artifact_*` calls under those strategies), so unauthorized-read
+counts on D1/D1'/D2 are zero by construction rather than by attack
+absence. The cost penalty over D2 is ~1.4× on the suite average —
+buying formal citations, audit signal, and bounded-parent-context.
 
 Honest framing for §11.2: ArtifactStore is *not* always cheaper as a
-delegation strategy. On small fixtures, raw forwarding (D2) is cheaper.
-On the 3.5K- and 9.6K-token fixtures, D3 simultaneously bounds parent-
-context (43% reduction at 3.5K, 74% reduction at 9.6K), produces
+delegation strategy. On small fixtures (≤577 raw tokens), raw
+forwarding (D2) is cheaper in both parent input and total cost. On
+the 3.5K- and 9.6K-token fixtures, D3 simultaneously bounds parent-
+context (43% reduction at 3.5K, ~75% reduction at 9.6K), produces
 verifiable citations on every successful run, and yields audit-log
 signal — properties D1, D1', and D2 cannot offer at all (D1/D1' lose
-evidence; D2 produces no citations or audit log). D3's success rate on
-the 9.6K fixture is 33% — the same as D2's, and below the small-fixture
-100%. The subagent over-explores on the larger artifact (avg 58K
-subagent input tokens). Improving subagent navigation at ≥10K artifact
-sizes is concrete future work (§14).
+evidence; D2 produces no citations or audit log). On the 9.6K
+fixture, D3's subagent over-explores (avg ~70 K subagent tokens, often
+hitting `max_turns=10`), and 1–2 of 3 reps fail because the subagent
+doesn't reach a confident diagnosis before the turn cap. D2's parent
+takes the full 25K hit but its single-turn diagnosis is reliable
+(2-3/3 in our reps). *Improving subagent navigation at ≥10K artifact
+sizes is the most concrete future-work item* (§14): better
+preview-driven prompt guidance, or a "best hypothesis after k spans"
+heuristic, would likely lift D3's 9.6K success rate without changing
+its parent-context advantage.
 
 == Adversarial permission stress (PLAN §11.3)
 
@@ -880,16 +1038,18 @@ on all 5 fixtures × 3 reps each (45 single-agent runs, 15 delegation
 runs, ~\$0.08 in DeepSeek API calls). The structural argument now has
 both an analytical and an empirical form.
 
-*Empirical observation*: across the 5-fixture suite, B3' (LLM-summary)
-underperforms deterministic B3 on average evidence recall (0.27 vs
-0.39) and matches it on task success (20% vs 40%). On the 9.6K
-`pytest_ci_run` fixture, B3' drops to 0.00 recall — the LLM
-summarizer's 250-token output ratio at 10K input is too aggressive,
-and the diagnostic WARNING line is summarized away. D1' (LLM
-delegation summary) modestly beats deterministic D1 on small fixtures
-(47% vs 33% success across the suite) but is 0% on the 9.6K fixture,
-same as D1. *In this evaluation, a real LLM-summary baseline does not
-close the recall gap with B4*.
+*Empirical observation* (n=15 per cell, committed data): across the
+5-fixture suite, B3' (LLM-summary) reaches 7/15 (47%) task success
+with avg recall 0.46 vs deterministic B3's 6/15 (40%) and 0.36.
+On the 9.6K `pytest_ci_run` fixture, B3' was 1/3 with recall 0.33 —
+the LLM summarizer's 250-token output ratio at 10K input is too
+aggressive on most reps, and the diagnostic WARNING line is
+summarized away in 2 of 3 attempts. D1' (LLM delegation summary)
+reaches 8/15 (53%) suite-wide vs deterministic D1's 5/15 (33%) — a
+real but modest gain. In this evaluation, a real LLM-summary
+baseline narrows but does not close the recall gap with B4
+(B3' 0.46 vs B4 0.82, both at n=15 with overlapping CIs on the
+small fixtures and clear separation on the 3.5K and 9.6K cells).
 
 *Analytical observation* (still load-bearing): four of B4/D3's wins
 require artifacts string summaries cannot produce, regardless of
@@ -984,7 +1144,33 @@ the headline numbers accordingly.
     re-run the full sweep on Sonnet 4.5 or other providers.
     Behaviors that depend on model-specific tool-use quirks
     (e.g., DeepSeek's `tool_choice` 400) are documented separately
-    in §7.],
+    in §7. A stronger model (e.g., Sonnet 4.6) would likely raise
+    B1/B4 absolute success rates and could compress the B4-vs-B1
+    gap on small fixtures, but is unlikely to change the structural
+    advantages (citations, audit log) which are dataset-level
+    properties, not model capabilities.],
+  [*No paired statistical tests across baselines.* We report Wilson
+    95% CIs on per-baseline success rates but do not run paired
+    bootstrap or McNemar tests against the same fixture-rep pairs;
+    at n=3 reps × 4 fixtures these tests have weak power, and we
+    do not want to imply a precision the data does not support. A
+    follow-up at n=10+ reps per cell with `temperature=0` would
+    enable proper hypothesis testing.],
+  [*Provider rate limits and live-run flakiness.* Among the 132 live
+    runs in our committed datasets, ~12% rep-failures are due to the
+    model returning malformed JSON arguments or hitting `max_turns`.
+    The `manifest.json` for each run records `successful` vs `failed`
+    so the rates are auditable. Improving max_turns guidance and
+    JSON-arg robustness in the supervisor's system prompt is open work.],
+  [*Reproducibility window.* DeepSeek V4 Pro is served as a moving
+    target — we record `git_rev` and `base_url` but the provider does
+    not currently publish per-deploy model snapshot IDs. Exact
+    rep-for-rep reproduction is therefore only practical against
+    Anthropic-native models that pin via dated model IDs (e.g.,
+    `claude-sonnet-4-5-20250929`). Within those bounds, our
+    `manifest.json` + committed `result.jsonl` give bit-exact
+    reproducibility of *the analysis*, even if the underlying LLM
+    behaviour drifts.],
 )
 
 = Provider-Agnostic Implementation
@@ -1620,35 +1806,45 @@ ArtifactStore reframes tool outputs as typed, indexed, permission-scoped
 artifacts with multi-resolution views. The implementation is a thin
 SQLite + FTS5 layer (~2.0 kLOC) plus a small client-side agent loop.
 
-Across 135 live runs against DeepSeek V4 Pro on 5 fixtures (407–9,609
-raw tokens) plus 10 offline stress scenarios:
+Across 135 live runs against DeepSeek V4 Pro on 5 fixtures
+(407–9,609 raw tokens) plus 10 offline stress scenarios, all
+data committed to `eval/runs/`:
 
-- *§11.1 single-agent*: ArtifactStore (B4) achieves 93% task success
-  and 0.90 avg evidence recall across the 5-fixture suite — the only
-  baseline above 50% success on the 9.6K-token `pytest_ci_run` fixture
-  (67%, with EER=1.00 on the 2 successful reps) where B1 drops to 33%
-  and B2/B3/B3' collapse to 0%. The LLM-summary B3' baseline (the
-  closest competitor on framing) actually trails deterministic B3 on
-  avg recall (0.27 vs 0.39) in this evaluation.
-- *§11.2 supervisor↔subagent*: D3 (scoped ArtifactStore delegation)
-  bounds parent context at ~6K tokens regardless of fixture size,
-  cutting parent input by 74% on the 9.6K fixture vs full-context
-  forwarding. D3 is the only strategy that produces citations the
-  supervisor can verify and is the only strategy with audit-log signal.
-- *§11.3 adversarial stress*: zero unauthorized reads succeed across 9
-  attack vectors. Every denial logs a specific `denial_reason`.
+- *§11.1 single-agent* (n=15 per baseline): B1 (raw injection) and
+  B4 (ArtifactStore) are statistically tied on suite-wide success
+  (15/15 vs 12/15, Wilson CIs overlap heavily). On the 9.6 K
+  `pytest_ci_run` fixture this rep set gave B1 3/3 and B4 0/3 — a
+  swing the per-cell CIs cannot separate. The robust finding is that
+  the summary baselines (B2/B3/B3') collapse to ≤33% success on
+  fixtures ≥3.5 K raw tokens. Where B4 *strictly* wins is everywhere
+  with structural properties: citation verifiability (0/45 B1/B2/B3/B3'
+  runs emit a well-formed citation; B4 emits avg 4.3/run, all
+  resolve), per-read audit signal, and selective span-aware redaction.
+- *§11.2 supervisor↔subagent* (n=15 per strategy): D3 (scoped
+  ArtifactStore delegation) bounds parent context at ~6 K tokens
+  regardless of fixture size, cutting parent input by ~4× on the
+  9.6 K fixture vs full-context forwarding D2. D2 reached 14/15
+  suite-wide success; D3 reached 12/15 (CIs overlap). D3 produces
+  citations the supervisor can verify (~5 per successful run, all
+  resolve) and per-read audit rows; D1/D1'/D2 produce neither
+  because the supervisor never sees a span.
+- *§11.3 adversarial stress*: zero unauthorized reads succeed across
+  9 attack vectors. Every denial logs a specific `denial_reason`.
 
-The contribution is not "this baseline saves the most tokens" — it is
-that, within this evaluation, ArtifactStore is the only configuration
-that simultaneously delivers reliable task success, exact-evidence
-recovery, structurally verifiable citations, and audit-log signal. The
-first two properties depend on the fixtures and baselines tested; the
-last two are *structural* — no LLM-summary baseline can produce
-formally verifiable citations or per-read audit rows because both
-require an underlying span store and grant check. The *Structural
-advantages* subsection of §8 makes that argument explicit so it
-survives a stronger summary baseline. That distinction is the right
-one for AI-agent harnesses moving toward supervisor/worker
+The contribution is *not* "ArtifactStore wins every empirical comparison"
+— under this rep set, B1 ties or beats B4 on raw success on 4 of 5
+fixtures, and the per-fixture pytest_ci_run cell flipped vs an earlier
+draft. The contribution is that, within this evaluation,
+ArtifactStore is the only configuration that simultaneously delivers
+(a) task success holding past the 3.5K-token regime where summary
+baselines collapse, (b) bounded parent context under delegation, (c)
+structurally verifiable citations, and (d) per-read audit signal.
+Properties (a)–(b) depend on the fixtures and the model's behavior at
+n=15 reps and have wide Wilson CIs; (c)–(d) are *structural* — no
+summary baseline, deterministic or LLM-driven, can produce formally
+verifiable citations or per-read audit rows because both require an
+underlying span store and grant check. That structural distinction is
+the right one for AI-agent harnesses moving toward supervisor/worker
 decomposition.
 
 #v(0.5em)

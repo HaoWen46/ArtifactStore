@@ -16,14 +16,19 @@ dist/
 *.db-wal
 *.db-shm
 *.sqlite
+*.sqlite-wal
+*.sqlite-shm
 *.sqlite3
 
 .DS_Store
 .idea/
 .vscode/
 
-eval/runs/*
-!eval/runs/.gitkeep
+# Eval result dirs: the report's tables are computed from committed
+# result.jsonl / manifest.json / config.json / audit.csv inside each run dir.
+# Per-run *.sqlite DBs are excluded by the global *.sqlite rule above
+# (they are large and re-derivable by replaying fixtures through the driver).
+eval/runs/*/__pycache__/
 artifactstore_data/
 
 # Claude Code local-only settings

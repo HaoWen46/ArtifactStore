@@ -1,0 +1,48 @@
+{
+  "mode": "delegation",
+  "started_at": "2026-05-13T06:04:49.521870+00:00",
+  "model": "deepseek-v4-pro",
+  "base_url": "https://api.deepseek.com/anthropic",
+  "git_rev": "475900d9638b0e2b37ce9fe929107454fb23d19a",
+  "fixtures": [
+    "pytest_auth_expiry",
+    "rg_grep_noise",
+    "git_diff_auth_refactor",
+    "pytest_large_run"
+  ],
+  "strategies": [
+    "D1_LLM_SUMMARY"
+  ],
+  "reps": 3,
+  "max_turns": 10,
+  "fixture_registry": {
+    "pytest_auth_expiry": {
+      "kind": "pytest",
+      "target": "auth_expiry",
+      "artifact_type": "pytest_failure",
+      "ext": ".log",
+      "reveal_target": true
+    },
+    "rg_grep_noise": {
+      "kind": "grep",
+      "target": "todos",
+      "artifact_type": "grep_result",
+      "ext": ".txt",
+      "reveal_target": true
+    },
+    "git_diff_auth_refactor": {
+      "kind": "git",
+      "target": "auth_diff",
+      "artifact_type": "git_diff",
+      "ext": ".diff",
+      "reveal_target": true
+    },
+    "pytest_large_run": {
+      "kind": "pytest",
+      "target": "auth_expiry",
+      "artifact_type": "pytest_failure",
+      "ext": ".log",
+      "reveal_target": false
+    }
+  }
+}

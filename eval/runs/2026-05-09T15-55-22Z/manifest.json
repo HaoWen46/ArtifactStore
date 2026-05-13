@@ -1,0 +1,53 @@
+{
+  "started_at": "2026-05-09T15:55:22.069848+00:00",
+  "finished_at": "2026-05-09T16:51:09.680970+00:00",
+  "elapsed_seconds": 3347.611122,
+  "total_runs": 48,
+  "successful": 36,
+  "failed": 12,
+  "exceptions": 0,
+  "total_input_tokens_uncached": 50819,
+  "total_input_tokens_cache_read": 231168,
+  "total_input_tokens_cache_creation": 0,
+  "total_input_tokens_all": 281987,
+  "total_output_tokens": 77376,
+  "total_estimated_cost_usd": 0.099479193,
+  "by_baseline": {
+    "B1_RAW": {
+      "runs": 12,
+      "avg_input_tokens_uncached": 669.25,
+      "avg_total_input_tokens": 1341.25,
+      "avg_output_tokens": 1343.1666666666667,
+      "avg_evidence_recall": 0.9500000000000001,
+      "task_success_rate": 1.0,
+      "avg_estimated_cost_usd": 0.00148891075
+    },
+    "B2_TRUNCATED": {
+      "runs": 12,
+      "avg_input_tokens_uncached": 94.83333333333333,
+      "avg_total_input_tokens": 329.5,
+      "avg_output_tokens": 871.75,
+      "avg_evidence_recall": 0.42777777777777776,
+      "task_success_rate": 0.5,
+      "avg_estimated_cost_usd": 0.000809883
+    },
+    "B3_SUMMARY": {
+      "runs": 12,
+      "avg_input_tokens_uncached": 85.58333333333333,
+      "avg_total_input_tokens": 256.25,
+      "avg_output_tokens": 945.1666666666666,
+      "avg_evidence_recall": 0.45,
+      "task_success_rate": 0.5,
+      "avg_estimated_cost_usd": 0.00086694775
+    },
+    "B4_ARTIFACT": {
+      "runs": 12,
+      "avg_input_tokens_uncached": 3385.25,
+      "avg_total_input_tokens": 21571.916666666668,
+      "avg_output_tokens": 3287.9166666666665,
+      "avg_evidence_recall": 0.938888888888889,
+      "task_success_rate": 1.0,
+      "avg_estimated_cost_usd": 0.00512419125
+    }
+  }
+}
