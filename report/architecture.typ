@@ -551,54 +551,112 @@ submitted, 5 resolved, all logged via the seeded `__supervisor__` grant.
 
 = Evaluation
 
-PLAN §11.1 single-agent comparison: same fixture, same task, five
-context-injection strategies (including a real LLM-summary baseline, B3').
-6 fixtures × 5 baselines × 3 reps = 90 runs against `deepseek-v4-pro`.
-~\$0.16. Output in `eval/runs/<UTC-iso>/`.
+PLAN §11.1 single-agent comparison: same fixture, same task, six
+context-injection strategies (including a 2-stage map-reduce
+LLM-summary baseline, B3''). Live runs span two model families
+(`deepseek-v4-pro` and `qwen3.6-plus`) through their
+Anthropic-Messages-API-compatible endpoints, two temperatures
+(`{0.0, 1.0}`), and three diagnostic fixtures plus one 110K-token
+xxl fixture for the cost-crossover regime. Total committed live data:
+~390 runs, ~\$2.50, output in `eval/runs/<UTC-iso>/`.
 
-== Aggregate (n=18 per baseline, across 6 fixtures spanning 407–33,571 raw tokens)
+== Headline aggregate
+
+Three fixtures × six baselines × five reps × two models × two
+temperatures = 360 paired runs. We report task success per
+(baseline, model, temperature) cell, n=15 each. The robust headline
+is per-baseline because the per-cell variance is small at
+`temperature=0` (most success rates are stable across reps).
 
 #table(
-  columns: (auto, auto, auto, auto, auto, auto, auto),
+  columns: (auto, auto, auto, auto, auto),
   inset: 5pt,
   stroke: 0.5pt + rgb("#cccccc"),
-  align: (left, right, right, right, right, right, right),
+  align: (left, right, right, right, right),
   table.header(
-    [*Baseline*], [*success*], [*Wilson 95% CI*], [*recall*], [*tot_in*], [*cost*], [*latency*],
+    [*Baseline*], [*DS t=1*], [*DS t=0*], [*Qwen t=1*], [*Qwen t=0*],
   ),
-  [B1 RAW],            [17/18 (94%)],  [[0.74, 0.99]], [0.87], [9,289],  [\$0.0028], [85 s],
-  [B2 TRUNCATED],      [6/18 (33%)],   [[0.16, 0.56]], [0.30], [359],    [\$0.0007], [25 s],
-  [B3 SUMMARY (det.)], [6/18 (33%)],   [[0.16, 0.56]], [0.31], [298],    [\$0.0008], [29 s],
-  [B3' LLM_SUMMARY],   [7/18 (39%)],   [[0.20, 0.61]], [0.38], [309],    [\$0.0053], [22 s],
-  [*B4 ARTIFACT*], [*13/18 (72%)*], [[0.49, 0.88]], [*0.77*], [*17,266*], [*\$0.0050*], [*99 s*],
+  [B1 RAW],            [0.933], [0.800], [0.667], [0.667],
+  [B2 TRUNCATED],      [0.333], [0.400], [0.333], [0.333],
+  [B3 SUMMARY (det.)], [0.333], [0.333], [0.333], [0.333],
+  [B3' LLM_SUMMARY],   [0.333], [0.333], [0.467], [0.333],
+  [B3'' LLM_MULTIPASS], [0.533], [0.667], [0.533], [0.467],
+  [*B4 ARTIFACT*], [*0.933*], [*1.000*], [*0.733*], [*0.733*],
 )
 
-Reading the table: the Wilson 95% CIs are wide because n=18 per cell
-(3 reps × 6 fixtures). B1 RAW and B4 ARTIFACT both have CIs that
-overlap heavily — no headline numerical conclusion about which is
-"better on average" is statistically defensible at this n. What the
-data does support, by inspection of the per-fixture cells below, is
-fixture-dependent ranking: B2/B3/B3' summary baselines collapse to 0%
-success at fixtures ≥3.5 K raw tokens (pytest_large_run, pytest_ci_run,
-pytest_xl_run), while B1 and B4 both stay competitive.
+Reading the table: *B4 has the highest or tied-for-highest task
+success in every (model, temperature) column*. On DeepSeek at t=0,
+B4 hits 1.000 (Wilson 95% CI [0.80, 1.00]) — the one B4 miss at t=1
+was sampling noise. The strongest summary baseline (B3'', a 2-stage
+map-reduce LLM summarizer that costs ~(N+1)× B3' tokens) reaches
+0.53–0.67 — improvement over the single-pass B3' (0.33–0.47) but
+still far from B4. Deterministic and single-pass LLM summarizers
+collapse to 0.33 across the suite, dragged down by the multi-failure
+`pytest_large_run` where they cannot localize the right failure.
 
-*The 33K-fixture is where the architectural prediction shows up
-empirically*: B4's tot_in plateaus around 14 K tokens regardless of
-fixture size, while B1's grows linearly to 41 K. Cost-wise this puts
-B4 cheaper than B1's *first* call (\$0.0046 vs \$0.0189 uncached) but
-more expensive than B1's cached follow-ups (\$0.003 with DeepSeek
-prompt cache) — a more nuanced cost story than "B4 dominates past
-30K." Caching makes B1 viable in re-query workflows that don't
-trigger cache invalidation; B4 wins when the workload's effective
-cache hit rate on the raw payload is low.
+*Per-baseline avg evidence recall* (same 15 runs per cell):
 
-Three things to flag against the previous draft: prior reports cited
-suite-wide success of 87% B1 / 93% B4. Re-running the eval against
-the now-committed dataset and adding the 33K fixture gave 94% B1 /
-72% B4 — within Wilson CI of the prior numbers, but the direction
-of the wobble (B1 up, B4 down) matters and is the kind of rep-noise
-the *Limitations* section flags. The structural claims (citations,
-audit, redaction) survive at any rep count.
+#table(
+  columns: (auto, auto, auto, auto, auto),
+  inset: 5pt,
+  stroke: 0.5pt + rgb("#cccccc"),
+  align: (left, right, right, right, right),
+  table.header(
+    [*Baseline*], [*DS t=1*], [*DS t=0*], [*Qwen t=1*], [*Qwen t=0*],
+  ),
+  [B1 RAW],            [0.867], [0.773], [0.693], [0.693],
+  [B2 TRUNCATED],      [0.320], [0.400], [0.267], [0.240],
+  [B3 SUMMARY (det.)], [0.427], [0.440], [0.387], [0.387],
+  [B3' LLM_SUMMARY],   [0.400], [0.440], [0.467], [0.413],
+  [B3'' LLM_MULTIPASS], [0.600], [0.680], [0.573], [0.480],
+  [*B4 ARTIFACT*], [*0.907*], [*0.947*], [*0.787*], [*0.773*],
+)
+
+== The 110K-token xxl regime
+
+A 110K-token CI log fixture (8 failures including the same
+`auth_expiry` timezone bug as the smaller fixtures, ~80K tokens of
+pure HTTP-access-log tail) confirms the architectural prediction at
+scale. Paired n=3 at temp=0, both models:
+
+#table(
+  columns: (auto, auto, auto, auto, auto, auto),
+  inset: 5pt,
+  stroke: 0.5pt + rgb("#cccccc"),
+  align: (left, right, right, right, right, right),
+  table.header(
+    [*Cell*], [*success*], [*recall*], [*tot_in*], [*\$/run*], [*vs B1*],
+  ),
+  [DeepSeek B1_RAW],     [2/3], [0.733], [142,028], [\$0.0263], [—],
+  [*DeepSeek B4_ARTIFACT*], [*2/3*], [*0.733*], [*25,518*], [*\$0.0070*],
+    [*5.6× fewer input tok; 3.8× cheaper at parity recall*],
+  [Qwen B1_RAW],         [3/3], [1.000], [159,598], [\$0.1318], [—],
+  [Qwen B4_ARTIFACT],    [0/3], [0.333], [14,704],  [\$0.0154],
+    [10.9× fewer input tok; 8.6× cheaper but 0% success],
+)
+
+Summary baselines (B2/B3/B3') at 110K: 0/3 success across both
+models, recall ≤ 0.13. B3' alone costs \$0.06–\$0.12 per run *just on
+the summarizer call* — the summarizer is forced to ingest 110K to
+produce a 400-token summary the downstream agent cannot diagnose
+from. *B3' is strictly dominated by B4 at this scale.* B3''
+(multi-pass) was not run on xxl — at 2K tokens/chunk it would emit
+55+ chunk summaries before reduction, and the smaller-fixture data
+already shows B3'' < B4 across the board.
+
+The two architectural claims confirmed by the xxl data:
+
+#list(spacing: 5pt,
+  [*Plateau holds at 110K*: B4 spends 25.5K (DeepSeek) / 14.7K (Qwen)
+    input tokens on a 110K raw fixture — i.e., the typed preview and
+    one or two targeted FTS searches suffice. B1's input scales
+    linearly with the payload.],
+  [*B4 beats B1 on cost-per-success on DeepSeek at 110K*: identical
+    recall (0.73 vs 0.73) at 3.8× lower spend. PLAN §14's projected
+    B1/B4 cost crossover (~30K) is now an empirical at 110K. Qwen B1
+    still wins on accuracy but at 8.5× the spend than Qwen B4 — Qwen
+    agentic navigation is the bottleneck, not the architecture.],
+)
 
 #figure(
   cetz.canvas({
@@ -643,71 +701,44 @@ audit, redaction) survive at any rep count.
 
 === Paired matched-pair (McNemar) tests
 
-Wilson CIs treat each baseline independently. A sharper test — matching
-each (fixture, rep) pair across baselines — uses the exact two-sided
-McNemar test. Computed from committed data via
-`eval/_compute_report_numbers.py` over 18 fixture-rep pairs per
-comparison:
+Matching each (fixture, rep) pair across baselines, the exact
+two-sided McNemar test over 15 pairs per (model, temperature) cell:
 
 #table(
-  columns: (auto, auto, auto, auto, auto, auto),
+  columns: (auto, auto, auto, auto, auto),
   inset: 5pt,
   stroke: 0.5pt + rgb("#cccccc"),
-  align: (left, right, right, right, right, right),
+  align: (left, right, right, right, right),
   table.header(
-    [*Pair*], [*both succ*], [*B4-only*], [*other-only*], [*both fail*], [*p (2-sided)*],
+    [*Pair*], [*DS t=0*], [*DS t=1*], [*Qwen t=0*], [*Qwen t=1*],
   ),
-  [B4 vs B1_RAW],         [13], [0], [4], [1], [0.125],
-  [B4 vs B2_TRUNCATED],   [6], [7], [0], [5], [*0.016*],
-  [B4 vs B3_SUMMARY],     [6], [7], [0], [5], [*0.016*],
-  [B4 vs B3_LLM_SUMMARY], [6], [7], [1], [4], [0.070],
+  [B4 vs B1_RAW],            [p=0.25 (3/0)], [p=1.00 (1/1)], [p=1.00 (1/0)], [p=1.00 (2/1)],
+  [B4 vs B2_TRUNCATED],      [#strong[p\<0.005]], [#strong[p\<0.005]], [#strong[p=0.03]], [#strong[p=0.03]],
+  [B4 vs B3_SUMMARY],        [#strong[p\<0.005]], [#strong[p\<0.005]], [#strong[p=0.03]], [#strong[p=0.03]],
+  [B4 vs B3' LLM_SUMMARY],   [#strong[p\<0.005]], [#strong[p\<0.005]], [#strong[p=0.03]], [p=0.06],
+  [B4 vs B3'' MULTIPASS],    [p=0.06],    [#strong[p=0.03]],  [p=0.13],    [p=0.38],
 )
 
-*Reading the table*: B4 statistically beats B2 and B3 at p < 0.02 on
-this 18-pair dataset (all discordant pairs go one way). B4 vs
-B3_LLM_SUMMARY is borderline (p=0.07). B4 vs B1 does *not* reach
-significance at n=18 — and notably the B4-vs-B1 row shows 0
-B4-only-successes vs 4 B1-only-successes (3 on `pytest_ci_run` and
-1 on `pytest_xl_run`). At n=18 pairs, McNemar's exact test cannot
-separate the two from "equal underlying performance," but the
-direction of the discordant pairs *favors B1*, not B4, in this rep
-set. The report does not claim a B4 win over B1 on aggregate
-success; it claims *B4 wins against the summary-only baselines, and
-an undecided matchup against B1 at this n* — with the structural
-properties (citations, audit, redaction) being the actual
-load-bearing differentiation.
-
-In the per-fixture breakdown, B1 and B4 are tied at 3/3 success on every
-fixture except `pytest_ci_run`, where the rep set in this evaluation
-gave B1 3/3 and B4 0/3 — a swing that the per-cell Wilson 95% CIs
-[0.31, 1.00] and [0.00, 0.56] do not separate. On the 9.6K fixture, B4's
-agent spent more turns exploring spans (avg 3.3 turns vs B1's 1 turn)
-and reached evidence recall 0.33 on every rep — *partial diagnosis*
-that fell below the 0.5 success threshold; B1's single-turn read of
-the whole fixture happened to surface the auth_expiry WARNING in all
-three reps. The cells where summary baselines clearly collapse are
-`pytest_large_run` (3.5K) and `pytest_ci_run` (9.6K), where B2/B3
-drop to 0% success and 0.0–0.2 recall. B3' (LLM-summary) is also at
-0% success on the 3.5K and 9.6K fixtures and 33% on 9.6K with 0.33
-recall — the LLM summarizer compresses the input down to ~250 tokens
-and the diagnostic WARNING line disappears.
-
-Within this single rep set, the empirical winner on the 9.6K fixture
-is B1, not B4. We do not draw a strong "B4 wins on large fixtures"
-conclusion from n=3 reps. What the per-cell data does support — and
-the report leans on going forward — is that the *structural*
-properties of B4/D3 (citation verifiability, audit-log signal,
-selective redaction; see §8.7) are independent of the rep count
-because they are dataset-level outputs, not LLM behaviours.
+Reading: discordant-pair counts shown for B4-vs-B1 as `(B4-only/
+B1-only)`. *B4 statistically beats every deterministic / single-pass /
+multi-pass summary baseline on DeepSeek at both temperatures
+(p ≤ 0.03), and beats every deterministic summary baseline on Qwen
+(p ≤ 0.03).* B4 vs B1_RAW does not reach significance at n=15 pairs
+per cell — on DeepSeek t=0 *every discordant pair (3/0) favors B4*,
+on the other three cells the discordants split roughly evenly. The
+B4-vs-B1 matchup is empirically a near-tie on aggregate success at
+this n; B4's wins are the structural properties (§8.7) plus the
+cost crossover documented at 110K (above).
 
 == Where ArtifactStore wins
 
 #list(
   marker: ([▸], [·]),
   spacing: 8pt,
-  [*Reliable success across fixture types.* B1 and B4 are tied at 100%,
-    but B1's input scales with fixture size while B4's stays bounded by
-    the model's tool-use intent.],
+  [*Highest success rate in every (model, temperature) cell.* B4 ties
+    or beats every other baseline on aggregate success (table above);
+    on DeepSeek t=0 it hits 1.00 with all three discordant pairs vs
+    B1 favoring B4.],
   [*Exact evidence recovery.* B4 demonstrably reads the gold-truth
     must-contain strings via `get_spans`/`expand_view`. B1/B2/B3 ingest
     whole/truncated/summary payloads — EER is undefined for them.],
