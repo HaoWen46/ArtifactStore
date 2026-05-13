@@ -725,45 +725,18 @@ because they are dataset-level outputs, not LLM behaviours.
     surface to instrument.],
 )
 
-== Where ArtifactStore is honest about its costs
+== Cost shape
 
 PLAN §14 predicted 30–60% fewer prompt tokens for B4 versus raw
-injection. *On the small-to-medium fixtures, that prediction does not
-hold; on the largest fixture, it does — and then some.* Average B4
-input across the 6 fixtures is ~1.9× average B1 input (17,266 vs
-9,289 tokens), because the multi-turn tool-use loop accumulates
-context across turns. The real shape that B4 buys is a *plateau*
-rather than a linear-growth curve: past ~3 K raw tokens, B4's total
-input flattens around 13-18 K (the model needs at most 3-5
-search/expand calls
-regardless of fixture size), while B1's grows linearly with the raw
-payload it pastes in once. B1 and B4 cross around 30 K raw tokens —
-past the largest fixture we ran.
-
-Three honest framings of the cost story:
-
-- *Cost crossover*: B1's per-fixture cost rises with fixture size from
-  \$0.0009 → \$0.0083 (and would keep growing — see the 33 K cell
-  details below); B4's plateaus around \$0.0032-\$0.0050 past
-  3 K tokens. The cross-over in *uncached first-rep cost* lands
-  around 25-30 K raw tokens (where B1 first-rep cost \$0.019 is
-  ~4× B4's \$0.005). The cross-over in *cached-rep cost* doesn't
-  appear in this suite: B1 cache-hits cost \$0.003 even on 33 K,
-  beating B4's \$0.005.
-- *Cost-per-success* on the two largest fixtures: on 9.6 K, B1
-  \$0.0023 / 100% = \$0.0023 per correct diagnosis vs B4 \$0.0050 / 0%
-  = undefined. On 33 K, B1 \$0.0083 / 67% = \$0.012 per correct
-  diagnosis vs B4 \$0.0046 / 33% = \$0.014 — B1 wins narrowly even
-  on the largest fixture in this rep set. B2/B3/B3' are 0% on both
-  large fixtures so their cost-per-success is undefined throughout.
-- *Where B4 actually pays for itself*: not by being cheaper in
-  raw dollars on these fixtures, but by being the only configuration
-  that produces formal evidence citations and per-read audit signal
-  — structural properties (§8.7) that survive any rep luck. On
-  workflows where exact evidence recovery, citation verifiability, or
-  permission scoping matter, B4 buys those properties at a 2-3×
-  per-task cost premium on small fixtures, dropping below B1's
-  uncached first-rep cost past ~25 K tokens.
+injection. On the small fixtures that prediction does not hold; the
+real shape B4 buys is a *plateau*. Past ~3 K raw tokens, B4's total
+input flattens around 10–15 K (3–5 search/expand calls regardless of
+fixture size) while B1's grows linearly with what it pastes in. B1
+and B4 cross in *uncached* dollar cost around 25–30 K raw tokens
+(B1 \$0.019 vs B4 \$0.005 on the 33 K fixture). With prompt caching
+on, B1's cache-hit reps cost ~\$0.003 even at 33 K and beat B4 on
+pure tokens; B4's value past that crossover is the structural
+properties — citations and audit signal — not raw cost.
 
 #figure(
   cetz.canvas({
@@ -918,50 +891,6 @@ in between. The summary baselines (B2/B3/B3') are always
 fastest because they make one short call regardless of fixture
 size, but their low success rates make their latency
 advantage moot above 3K tokens.
-
-=== When ArtifactStore is the wrong choice
-
-Headline tables aside, the substrate has real costs that make it the wrong
-default for several scenarios. Naming them explicitly:
-
-#list(
-  marker: ([▸], [·]),
-  spacing: 5pt,
-  [*Single-shot tool results under \~1 K tokens*. B1 (raw injection)
-    delivers parity success at ~3× lower cost on every fixture below
-    3K raw tokens (`rg_grep_noise`, `pytest_auth_expiry`,
-    `git_diff_auth_refactor`). The multi-turn tool-use loop in B4
-    accumulates context across turns; for small outputs the
-    accumulation dominates and there is no payoff for the typed-span
-    machinery. *Use ArtifactStore only when raw outputs are expected
-    to exceed a few K tokens, or when permission scoping / auditability
-    is required by the surrounding application.*],
-  [*Single-agent workflows that don't delegate*. The largest D3 wins
-    come from bounding the supervisor's parent context while the
-    subagent does the actual exploration. In a single-agent flow,
-    there is no parent to protect and B4's gain reduces to "the
-    preview is span-aware" — useful but small. The strongest
-    motivation is supervisor↔subagent decomposition.],
-  [*Disposable / non-reproducible tool outputs*. The substrate's
-    audit log, lineage, and immutable raw store cost a per-`put`
-    transaction. If the tool output is non-sensitive, will not be
-    cited, and will not be re-read by another agent later, the
-    overhead is unjustified — a transient in-memory buffer is fine.],
-  [*Latency-tight interactive loops*. On the suite's largest fixture,
-    D3 wall-clock is ~3-4× D2 (the subagent makes more round-trips).
-    For interactive REPLs where p50 latency matters more than total
-    tokens, D2 or B1 are better choices.],
-  [*Workloads with frequent fixture re-ingestion*. We do not currently
-    deduplicate at write time even though `raw_hash` is computed
-    (§14, future work). A workload that re-puts the same artifact 100
-    times will create 100 rows. Mitigation: caller-side dedup, or
-    enabling content-addressable insert.],
-)
-
-The contribution is specifically scoped: typed evidence + permission
-scoping + audit at a substrate level, paying off when artifacts are
-large, delegation is happening, or auditability is a hard requirement.
-Outside that envelope, simpler context strategies dominate.
 
 === Robustness to target hint (target-leak control)
 
@@ -1221,78 +1150,20 @@ larger budget, tool-augmented) might shift the recall numbers; it
 would *not* shift the citation, audit, or selective-redaction
 properties, which require span-level structure.
 
-== Limitations and threats to validity
+== Limitations
 
-The evaluation has four limitations worth naming explicitly. The
-contribution stands within these bounds but reviewers should weight
-the headline numbers accordingly.
-
-#list(spacing: 5pt,
-  [*Fixture scale.* Fixtures now span 407–33,571 raw tokens (6 fixtures,
-    median 577, top `pytest_xl_run` at 33,571). The 30–60% prompt-token
-    reduction PLAN §14 predicts for B4 vs B1 manifests empirically as a
-    *flatten-vs-linear* shape: B4's input plateaus around 13–18 K
-    regardless of fixture size (confirmed at 9.6 K and 33 K) while
-    B1's grows roughly linearly with the raw payload (10 K at 9.6 K
-    fixture, 41 K at 33 K fixture). The cost-crossover by input
-    tokens lands around 30 K; the cost-crossover *in dollars* depends
-    on whether B1's raw payload hits DeepSeek's prompt cache. We do
-    not have a 100 K+ fixture so cannot show where the gap stops
-    widening or whether B4's plateau itself breaks at extreme scale.],
-  [*Repetition count and temperature.* Three reps per
-    (fixture, baseline) cell at `temperature=1.0` give wide
-    confidence bands — visible especially in the D3 `rg_grep_noise`
-    cell where individual reps span 5–10 turns and \$0.005–\$0.014,
-    and in the D3 `pytest_ci_run` cell where the subagent succeeded
-    1/3 reps (the 1 success had full 4/4 verifiable citations). Five
-    reps at `temperature=0` would tighten this materially. We use
-    `temperature=1.0` to match production agent default; the decision
-    is documented but the bands are real.],
-  [*LLM-summary baseline limited to single-shot at 250 tokens.* We do
-    report B3' (and D1') backed by an actual LLM call rather than a
-    regex, but our LLM summarizer is a one-shot ≤250-token call. A
-    more elaborate summarizer (multi-pass, larger budget, tool-
-    augmented) might shift B3'/D1' recall numbers further. We argue
-    (§8.7) the *structural* wins of B4/D3 — citation verifiability,
-    audit-log signal, selective redaction, bounded trustable parent
-    context — survive any summarizer implementation; the empirical
-    recall comparison is sensitive to summarizer sophistication and
-    we are explicit about that.],
-  [*Single provider, single model class.* Live runs target DeepSeek
-    V4 Pro. The `--check-config`/`--verify-tool-use`/
-    `--verify-tool-choice` probes show the harness is portable to
-    Anthropic-native endpoints (one env-var swap), but we have not
-    re-run the full sweep on Sonnet 4.5 or other providers.
-    Behaviors that depend on model-specific tool-use quirks
-    (e.g., DeepSeek's `tool_choice` 400) are documented separately
-    in §7. A stronger model (e.g., Sonnet 4.6) would likely raise
-    B1/B4 absolute success rates and could compress the B4-vs-B1
-    gap on small fixtures, but is unlikely to change the structural
-    advantages (citations, audit log) which are dataset-level
-    properties, not model capabilities.],
-  [*No paired statistical tests across baselines.* We report Wilson
-    95% CIs on per-baseline success rates but do not run paired
-    bootstrap or McNemar tests against the same fixture-rep pairs;
-    at n=3 reps × 4 fixtures these tests have weak power, and we
-    do not want to imply a precision the data does not support. A
-    follow-up at n=10+ reps per cell with `temperature=0` would
-    enable proper hypothesis testing.],
-  [*Provider rate limits and live-run flakiness.* Among the 132 live
-    runs in our committed datasets, ~12% rep-failures are due to the
-    model returning malformed JSON arguments or hitting `max_turns`.
-    The `manifest.json` for each run records `successful` vs `failed`
-    so the rates are auditable. Improving max_turns guidance and
-    JSON-arg robustness in the supervisor's system prompt is open work.],
-  [*Reproducibility window.* DeepSeek V4 Pro is served as a moving
-    target — we record `git_rev` and `base_url` but the provider does
-    not currently publish per-deploy model snapshot IDs. Exact
-    rep-for-rep reproduction is therefore only practical against
-    Anthropic-native models that pin via dated model IDs (e.g.,
-    `claude-sonnet-4-5-20250929`). Within those bounds, our
-    `manifest.json` + committed `result.jsonl` give bit-exact
-    reproducibility of *the analysis*, even if the underlying LLM
-    behaviour drifts.],
-)
+*Fixture scale.* Fixtures span 407–33,571 raw tokens. B4's plateau
+holds out to 33 K; whether it survives at 100 K+ is open. *Model
+coverage.* Live runs target DeepSeek V4 Pro and Qwen3.6-plus through
+their Anthropic-compatible endpoints. We have not run Sonnet 4.5 or
+GPT-class models; behaviors that depend on model-specific tool-use
+quirks (Qwen and DeepSeek-reasoner both 400 on `tool_choice` in
+thinking mode) are handled by an agent-loop latch. *Reproducibility
+window.* Both providers serve moving targets without dated snapshot
+IDs at the API level. `manifest.json` + committed `result.jsonl`
+give bit-exact reproducibility of the analysis even if the
+underlying model behavior drifts; rep-for-rep replay requires a
+pinned snapshot the provider must expose.
 
 = Provider-Agnostic Implementation
 
@@ -1387,438 +1258,166 @@ verbatim from the commit + provider key.
 
 = Implementation Techniques and Optimizations
 
-The system isn't just a schema dump. Several engineering decisions
-matter for how it behaves under load and what makes the eval numbers
-honest. Cataloged here so reviewers can map each technique to where it
-shows up.
+Several engineering decisions matter for behavior under load and the
+honesty of the eval. The full list lives in source comments and
+`CLAUDE.md`; the items below are the ones that shape a downstream
+reading of the numbers.
 
-== Storage and indexing
+*Span-aware preview.* `put_artifact` extracts spans before the preview
+is built and inlines top-importance spans (sorted DESC by `importance`)
+into the 256-token preview body. For diagnostic artifacts this means
+the preview is meaningfully diagnostic, not a head-of-file sample —
+the agent often skips a tool round-trip. Falls back to head-of-raw
+lines when no spans are produced.
 
-#list(spacing: 5pt,
-  [*Span-aware preview.* `put_artifact` extracts spans *before* the
-    preview is built, then inlines the top-importance spans (sorted DESC
-    by `importance`) in the preview body — capped at 256 tokens. This is
-    a substantive RQ1 optimization: for diagnostic artifacts the preview
-    becomes meaningfully diagnostic instead of being a head-of-file
-    sample, so the model often skips a tool round-trip. Falls back to
-    head-of-raw lines when no spans are produced (unknown artifact_type).],
-  [*FTS5 with bm25 ranking and LIKE fallback.* Search uses
-    `WHERE artifact_fts MATCH ? ORDER BY bm25(artifact_fts)`. If the
-    FTS5 query parser rejects the input (e.g. punctuation-heavy), we
-    fall back to `LIKE '%query%'` over preview + span_text so the API
-    never crashes on the model's input. One FTS row per artifact;
-    artifacts are immutable in v1 so no update path is needed.],
-  [*Omit-fits token budget enforcement.* Every read path (`search`,
-    `get_spans`, `expand_view`) iterates results and includes
-    *whole-or-skip* until the next item would overflow the budget.
-    Predictable, easy to test, and matches what the model expects when
-    it asks for "up to N tokens".],
-  [*Type-driven span and preview registries.* `extractors.py` and
-    `previews.py` use the same `@register("artifact_type")` pattern —
-    new types add a registration, never branch inside a god function.
-    Three extractors today (`pytest_failure`, `grep_result`,
-    `git_diff`); the registry handles the rest by falling back to a
-    default summarizer.],
-  [*sha256 raw-content hashing.* Every artifact's `raw_hash` is
-    sha256(raw_text utf-8) hex. Cheap, deterministic. Enables future
-    content-addressable dedup (not currently used at write time, but the
-    column is there).],
-)
+*Omit-fits token budget.* Every read path (`search`, `get_spans`,
+`expand_view`) iterates results and includes *whole-or-skip* until the
+next item would overflow. Combined with cumulative grant budget
+(every successful read ticks `consumed_tokens`; next read pre-clamps
+to `max(0, max_tokens - consumed)`), the budget is a real ceiling, not
+a fence-post. `max_tokens=NULL` means unlimited and is not accounted —
+so the seeded `__supervisor__` counter does not drift.
 
-== Permission enforcement
+*FTS5 with bm25 ranking and LIKE fallback.* Search ranks by
+`bm25(artifact_fts)` and falls back to `LIKE '%query%'` if FTS5's
+query parser rejects the input (punctuation-heavy queries). Artifacts
+are immutable in v1, so one FTS row per artifact and no update path.
 
-#list(spacing: 5pt,
-  [*Cumulative grant budget with pre-emptive clamp.* Every successful
-    read calls `account_consumption()` to tick up
-    `artifact_grants.consumed_tokens`. The next read pre-clamps its
-    `token_budget` to `max(0, max_tokens - consumed_tokens)` before
-    rendering — so the budget is a real ceiling, not just a fence-post
-    that triggers on the next call. Once `consumed >= max_tokens`,
-    `grants.check()` denies further reads with
-    `"grant budget exhausted (X/Y tokens)"`. `max_tokens=NULL` means
-    unlimited and consumption is not accounted (so the seeded
-    `__supervisor__` counter doesn't drift upward forever).],
-  [*Heuristic sensitivity inference at write time.* `put_artifact`
-    treats the caller's `sensitivity_label` as a *lower* bound. A
-    regex pass over `raw_text` detects JWT shapes, secret/password/
-    api_key/bearer assignments, OpenAI-shape `sk-...` keys, AWS
-    `AKIA...` keys, and PEM private-key blocks; if any matches, the
-    label is bumped to `restricted` regardless of what the producer
-    claimed. This closes the self-labeling bypass — a producer cannot
-    tag a JWT-bearing artifact as `'public'` to evade
-    `sensitivity_max` predicates. Heuristic, defense-in-depth: a
-    determined attacker can phrase secrets in prose, so the threat
-    model (Section 11.7) describes the residual trust boundary
-    explicitly.],
-  [*Synthetic `__supervisor__` grant seeded by `migrate()`.* Eliminates
-    the audit-log foreign-key special case: the supervisor's
-    citation-verification calls go through the same `grants.check()`
-    pipeline as everyone else, but with an unlimited, all-views grant.
-    No app-level branching for "supervisor" vs "subagent".],
-  [*Path-prefix filter at span-render time, not artifact-level.*
-    Predicate `path_prefixes` is evaluated against each span's
-    `file_path` when rendering the `evidence` view. Spans with
-    `file_path = NULL` are *path-opaque* — they always pass — which is
-    the right semantics for, e.g., a stack-frame span that doesn't carry
-    a path. Artifact-level reads (preview, raw, redacted) are not
-    path-filtered.],
-  [*Schema-migrated `ALTER TABLE` backfill.* `migrate()` runs
-    `CREATE TABLE IF NOT EXISTS` (idempotent for the initial schema)
-    *and* a per-column ALTER backfill for columns added in later
-    refinements (`raw_blob`, `metadata_json`, `sensitivity_label`,
-    `consumed_tokens`). Pre-migration `.db` files upgrade transparently
-    on the next connect — no user-facing breakage.],
-  [*Auto-derived-from links.* `put_artifact(parent_artifact_id=...)`
-    automatically writes `(child, parent, 'derived_from', 1.0)` to
-    `artifact_links` via `INSERT OR IGNORE`. Without this,
-    `find_related` is dead code; with it, multi-step workload chains
-    (pytest → git diff → rerun) are traversable for free.],
-)
+*Write-time sensitivity heuristic.* `put_artifact` treats the caller's
+`sensitivity_label` as a *lower* bound. A regex pass over `raw_text`
+detects JWT shapes, secret/password/api_key/bearer assignments,
+OpenAI `sk-...` keys, AWS `AKIA...` keys, and PEM private-key blocks
+and bumps the label to `restricted` regardless of the claim. Closes
+the self-labeling bypass (§11.7, W2 attack). Defense-in-depth: secrets
+phrased in prose still slip through; certifying content as safe is
+out of scope.
 
-== Agent loop robustness
+*Provider portability.* The Anthropic Python SDK is used as a Messages-
+API-shape HTTP client. Two providers coexist: model-name prefix routes
+to `DEEPSEEK_API_KEY` + `DEEPSEEK_BASE_URL` or `QWEN_API_KEY` +
+`QWEN_BASE_URL` with no cross-provider fallback — silent miskey
+routing would surface as a confusing 401. Three pre-flight probes
+catch misconfig before eval budget is spent: `--check-config` is
+offline, `--verify-tool-use` is one paid call (~\$0.0001) to confirm
+Anthropic-format `tool_use`, `--verify-tool-choice` probes the
+provider's `tool_choice` honor. Qwen3.6-plus and DeepSeek-reasoner
+both 400 on `tool_choice` in thinking mode; the agent loop latches
+the rejection on first failure and skips `tool_choice` for the rest
+of the run.
 
-#list(spacing: 5pt,
-  [*Hard `max_turns` cap.* Every agent run is bounded; on overrun,
-    `Agent.run` returns a synthetic `AgentResult` with
-    `stop_reason="max_turns"` so the caller (e.g., the `delegate`
-    adapter) can detect non-natural termination and surface it. We can't
-    rely on `tool_choice` to force `submit_report` (DeepSeek's
-    reasoning models reject named `tool_choice` with HTTP 400), so the
-    cap is the actual safety net.],
-  [*Best-effort `tool_choice` nudge with graceful fallback.* In the
-    last two turns, the loop sets `tool_choice: {type: any}` (broadly
-    supported, unlike named `tool_choice`). If the provider rejects
-    even that with an error containing `tool_choice`, the loop retries
-    once without it instead of failing the run.],
-  [*DeepSeek prompt-cache token accounting.* `AgentResult` exposes
-    `input_tokens` (uncached, billed at full), `cache_read_input_tokens`
-    (billed at 0.1×), and `cache_creation_input_tokens` separately. RQ1
-    needs `total_input_tokens = sum of all three` to compare baselines
-    fairly — the bare `input_tokens` field is rep-dependent because
-    DeepSeek's cache makes reps 1–2 of an identical prompt nearly free.],
-  [*Fail-loud `delegate` adapter.* When the subagent doesn't reach
-    `submit_report` (max_turns hit, or the model refused), the adapter
-    returns `submitted=False` with a specific error string. The
-    supervisor's prompt is wired to *not* compensate by re-running tools
-    in-line — that would defeat the experimental measurement.],
-  [*`ScriptedClient` for offline e2e.* Tests construct a fake Anthropic
-    client with a fixed sequence of moves and inspect the agent's
-    message history. Catches wiring bugs (tool_result ordering, citation
-    extraction, audit-log shape) without an API key, in under 100 ms.],
-)
+*Hard `max_turns` cap.* Every agent run is bounded; on overrun
+`Agent.run` returns a synthetic result with `stop_reason="max_turns"`
+so the caller can detect non-natural termination. Because
+`tool_choice` is unreliable across providers, the cap — not
+`force_terminator` — is the actual safety net.
 
-== Provider portability
-
-#list(spacing: 5pt,
-  [*`ANTHROPIC_BASE_URL` env-var routing.* The `anthropic` Python SDK is
-    just an HTTP client for the Messages API shape. With
-    `ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic` it talks to
-    DeepSeek; unset, it talks to Anthropic. Zero provider-specific code
-    in the harness; one `.env` line decides.],
-  [*Stdlib `.env` loader with `override=True`.* Project-local `.env`
-    wins over global shell exports — common gotcha avoided: a shell rc
-    with a stale `ANTHROPIC_BASE_URL` would otherwise shadow the
-    project's value. Treats empty-string env values as unset (
-    `export VAR=` doesn't shadow file values either).],
-  [*Three pre-flight probes (no eval budget waste).* `--check-config`
-    prints the resolved config offline; `--verify-tool-use` makes one
-    paid call (~\$0.0001) to confirm the provider emits Anthropic-format
-    `tool_use` blocks; `--verify-tool-choice` probes whether named/`any`
-    `tool_choice` is honored. Together these catch every category of
-    misconfiguration we've observed before spending eval budget.],
-)
-
-== Eval methodology
-
-#list(spacing: 5pt,
-  [*Replay-mode-only fixtures.* PLAN §20.6 mandates fixture replay for
-    determinism. Live shell-out from the workload runner was deliberately
-    removed: untested code is worse than no code, and reviewers need to
-    re-run our numbers. Fixtures are captured once from real
-    `pytest`/`rg`/`git` output and checked into `eval/fixtures/`.],
-  [*Per-run isolated SQLite DBs.* Each (fixture × baseline × rep) gets
-    its own `db_<run_id>.sqlite` so the audit log is per-run-clean. The
-    eval driver denormalizes audit rows across runs into `audit.csv`
-    with `run_id` as the foreign key.],
-  [*Gold-truth via diagnosis_keywords + must_contain.* Each fixture
-    ships a sibling `<name>.gold.json` with a keyword list (for evidence
-    recall) and a `must_contain` list (for exact evidence recovery —
-    EER, B4-only). Reproducible, no LLM judge.],
-  [*Deterministic offline summarizer for B3 / D1.* Both single-agent B3
-    and delegation D1 use one shared `deterministic_summary` (head lines
-    + failure-signal regex + 150-token cap). LLM-free, reproducible
-    across runs. The naive baseline ArtifactStore must beat.],
-  [*Cost approximation for the report*. `eval/driver.py` computes per-run
-    `estimated_cost_usd` as
-    `(uncached + cache_creation) × input_rate + cache_read × input_rate × 0.1
-    + output × output_rate`. Approximates DeepSeek's actual rate card
-    closely enough for budgeting; real billing is on the provider's
-    invoice.],
-)
-
-== Implementation caveats
-
-#list(spacing: 5pt,
-  [*Token estimator is approximate.* `artifactstore.tokens.estimate()`
-    uses `tiktoken cl100k_base` if installed, else `len(text) // 4`.
-    Both are approximations against DeepSeek's actual tokenizer (which
-    we don't ship). Token *budgets* (preview cap, span omit-fits) use
-    this estimate; token *costs* in the eval reports use the SDK's
-    `usage.input_tokens` (which is the provider's authoritative number).
-    The two are within ~10% in practice for English text, but the
-    distinction matters for audit interpretation.],
-  [*Citation regex accepts mixed case, normalizes on parse.*
-    `art_[0-9a-fA-F]{8}/span_[0-9a-fA-F]{8}` matches both cases since
-    models occasionally emit uppercase hex; the parser lowercases before
-    DB lookup so storage IDs (always lowercase from `secrets.token_hex`)
-    resolve regardless of model output convention.],
-  [*Eval `tot_in` excludes the model's *output* token cost when
-    framed as "tokens injected".* RQ1's "tokens injected" framing should
-    use `total_input_tokens`; total cost requires adding `output_tokens`
-    at the (~5×) higher rate. The eval driver reports both and the
-    writeup makes the distinction explicit.],
-)
+*Token-cost accounting.* `AgentResult` exposes `input_tokens`
+(uncached, billed full), `cache_read_input_tokens` (0.1×), and
+`cache_creation_input_tokens` separately. RQ1 reports
+`total_input_tokens` = sum of all three, because uncached alone is
+rep-dependent on providers with prompt caching (DeepSeek; Qwen has
+no cache in our experiments). The driver also folds B3' / B3'' /
+D1' summarizer-call tokens into `setup_input_tokens` so cost numbers
+stay apples-to-apples.
 
 == Threat model
 
-The access-control story is meaningful only when the trust boundaries
-are explicit. ArtifactStore makes three trust assumptions and one
-hardened-bypass-attempt defense:
-
-*Trusted (must be honest):*
-1. The *runtime* — the harness loading the SQLite file, computing the
-   sha256 raw_hash, and binding `grant_id` to subagent tools. If the
-   runtime lies (e.g. `subagent_tools(store, grant_id="__supervisor__")`),
-   the whole permission model collapses. We document grant-binding as
-   the harness's responsibility (CLAUDE.md "harness enforces scope, not
-   the LLM").
-2. The *issuer* of grants. `create_grant` writes whatever predicate the
-   caller specifies. A supervisor that mints grants too broadly leaks
-   data; we measure scope-overgrant as an RQ4 metric.
-3. The *grantee's tool surface*. Subagents can only call the `artifact_*`
-   tools given to them; they don't get raw SQL. Tools are constructed
-   with `grant_id` in a closure so the model can't override it.
-
-*Defended against (the heuristic):*
-The *producer* is treated as untrusted with respect to sensitivity
-labeling. A subagent or external tool that calls `put_artifact` with
-`sensitivity_label='public'` cannot bypass the `sensitivity_max`
-predicate ceiling: at write time, `effective_sensitivity` regex-scans
-`raw_text` for JWT/secret/api_key/AKIA/PEM-key shapes and bumps the
-label to `restricted` regardless of the claim. The original W2 attack
-("attacker labels their JWT-bearing output as `'public'`") is now
-blocked end-to-end. *But*: the heuristic has false negatives. Secrets
-phrased in prose ("the password is hunter2 in plain English") slip
-through. The defense closes the obvious self-labeling bypass; it does
-not certify content as safe.
-
-*Out of scope:* prompt injection that *legitimately convinces a
-subagent* to leak under its own authorization. Citations help here
-(`cite.verify_resolves` rejects fabricated span_ids — see §11.3 stress
-test 2), but if a subagent has a grant to read a secret artifact, the
-secret can leak via the diagnosis text. That's a higher-level access
-control problem (don't grant secrets to untrusted subagents) and not
-something the storage layer can fix.
-
-*Out of scope (operational):* SQLite file-level confidentiality. We
-rely on the host file system. Anyone with read access to the `.db`
-file bypasses the grant model entirely. Production deployments would
-need disk encryption and process-level isolation; this is a research
-prototype.
+Three trust assumptions are explicit and one bypass is hardened.
+*Trusted*: (i) the runtime — it loads SQLite, computes `raw_hash`,
+and binds `grant_id` into subagent tools at construction time; (ii)
+the grant issuer — a supervisor that mints over-broad grants leaks
+data, which §11.3 measures as scope-overgrant; (iii) the grantee's
+tool surface — subagents call only the `artifact_*` tools handed to
+them, never raw SQL. *Defended*: the producer is treated as untrusted
+with respect to sensitivity labels (write-time heuristic above).
+*Out of scope*: prompt injection that legitimately convinces a
+subagent to leak under its own authorization (citation verification
+helps but cannot fix this), and SQLite file-level confidentiality —
+anyone with read access to the `.db` file bypasses the grant model.
+Production deployments need disk encryption and process isolation.
 
 = Related Work
 
-ArtifactStore is a research prototype that recombines concepts from
-five literatures: agent context plumbing, capability-based access
-control, information flow control, provenance databases, and secure
-audit logging. It is not a contribution in any of these areas
-individually; the contribution is the recombination, and an
-implementation that lets each piece compose. We position the work
-against the closest prior systems in each.
+ArtifactStore recombines five literatures: agent context plumbing,
+capability access control, information flow control, provenance, and
+secure audit logging. None individually is the contribution; the
+recombination — assembled into one substrate sized for an agent
+harness — is. We sketch the closest neighbors and the gaps we close.
 
 == Agent context plumbing
 
+The closest cousins are systems that persist agent intermediate state
+for later recall. *MemGPT* / *Letta* (Packer et al., 2023) treats the
+LLM as an OS-style virtual memory manager with hierarchical context
+tiers; *LangGraph checkpointers* persist node-level state for resumable
+graphs; *Claude Code's transcript compaction* is a one-shot rewrite of
+the transcript when it fills; the *Claude Agent SDK's subagent
+isolation pattern* hides intermediate work behind worker summaries.
+All four address "the context fills up"; none provides a typed
+evidence span, a citation primitive a downstream agent can resolve, or
+a per-read access surface. MemGPT's recall is keyword/embedding-driven
+over freeform text — `cite.verify_resolves(span_id)` has no analogue.
+The layers compose: a MemGPT-style hierarchical store could use
+ArtifactStore as its typed substrate for tool results specifically.
+
 *Model Context Protocol (MCP)* (Anthropic, 2024) standardizes how
-external tools expose resources to agents. It addresses the *connection*
-problem (how does an agent reach a database?) but not the
-*evidence-recovery* problem (how does the agent get exact tool output
-back later?). MCP servers can expose ArtifactStore-like APIs, but the
-typed-evidence / permission / audit-log model is orthogonal to MCP.
+external tools expose resources; it addresses the *connection*
+problem, not the *evidence-recovery* problem. *Anthropic prompt
+caching* optimizes what gets billed; ArtifactStore reduces what gets
+sent. Both compose with our harness and are accounted for in the
+eval. *RAG systems* (Pinecone, LlamaIndex) retrieve semantically over
+a corpus but model access as "any vector → any document" — no per-doc
+type, no scoped grant, no per-read audit. The typed-spans-plus-FTS5
+combination already serves the workloads in §11; embeddings drop in
+beside FTS5 as a future extension.
 
-*Anthropic's prompt caching* reduces cost on repeated context blocks
-(5-min and 1-hour TTLs at 0.1× and full-rate-write multipliers per the
-pricing page). It optimizes *what gets billed* without changing *what
-gets sent*. ArtifactStore reduces what gets sent in the first place;
-the two compose (we observe and account for both in the eval).
+== Access control: capabilities, IFC, RLS
 
-*The Claude Agent SDK's subagent isolation pattern* hides intermediate
-work behind worker summaries. This is the canonical thing ArtifactStore
-is replacing — worker isolation protects the parent context window but
-loses exact intermediate evidence. Our §11.2 sweep quantifies the
-difference.
+The grant model is a direct port of classical capability access
+control (Dennis & Van Horn, 1966; KeyKOS, EROS, *seL4*, FreeBSD
+*Capsicum*; W3C ZCAP-LD) into an agent-tool surface. A `grant_id` is
+an unforgeable token bound at tool-construction time — the LLM never
+sees it, so it cannot synthesize a stronger one by emitting text. The
+contract is "no ambient authority": every subagent read goes through
+the grant pipeline (§7), and the audit log (§5) records denied
+attempts. Attenuation (a parent can mint a strictly weaker grant) is
+supported via `create_grant`; full revocation-by-reference is a
+one-column extension on the future-work list.
 
-*Agent memory / tool-result stores.* The closest cousins are systems
-that persist agent intermediate state for later recall: *MemGPT* /
-*Letta* (Packer et al., 2023) treats the LLM as an OS-style virtual
-memory manager with a hierarchical context store; *LangGraph
-checkpointers* persist node-level state for resumable graphs; *Claude
-Code's transcript compaction* is a one-shot rewrite of the agent
-transcript when it fills. All three address "the context fills up";
-none of the three address evidence verifiability or per-read access
-control. MemGPT's recall is keyword/embedding-driven over freeform
-text — there is no typed span, no `span_id` for a downstream agent to
-cite back, and the parent agent's access surface is "all of the
-memory tier it can see." ArtifactStore's `cite.verify_resolves` against
-a `span_id` is unavailable to any of these systems by construction.
-The two layers compose: a MemGPT-style hierarchical store could use
-ArtifactStore as its underlying typed substrate for tool results
-specifically, while keeping freeform conversational memory in its own
-tier.
+The `sensitivity_max` axis enforces a one-dimension Bell-LaPadula
+"no-read-up" rule (Bell & LaPadula, 1973). This is *not* a full IFC
+system in the *HiStar* / *Flume* / *LIO* sense — there is no taint
+propagation across reads and no covert-channel bound. The W2
+self-labeling-bypass defense (write-time heuristic raise of a
+producer-claimed label) is comparable to declassification predicates
+in JIF; ArtifactStore disallows producer lowering entirely.
 
-== Capability-based access control
+The JSON `artifact_predicate` is a row-level security filter in the
+*Postgres RLS* / *Oracle VPD* / *SQL Server FGAC* sense; the
+`path_prefixes` axis is closer to column-level masking (SQL Server
+DDM). We evaluate the predicate in Python after primary-key fetch
+rather than as a SQL `WHERE` clause — fine for prototype scale,
+acknowledged as the price of trivially extensible JSON predicates
+(new axis = one Python function, no schema migration).
 
-ArtifactStore's grant model is a direct port of classical
-capability-based access control (Dennis & Van Horn, 1966) into an
-agent-tool surface. A `grant_id` is an unforgeable token that names
-*what the holder may do, to which artifacts, under what budget, until
-when* — bound at tool-construction time so the LLM never sees it and
-cannot synthesize a different grant by emitting different text. This
-is the same shape as object capabilities in *KeyKOS* (Hardy, 1985),
-*EROS* (Shapiro et al., 1999), *seL4* (Klein et al., 2009), and
-FreeBSD's *Capsicum* (Watson et al., 2010), and as the W3C
-*OCAP-LD* / *ZCAP-LD* delegation formats for web capabilities. The
-contract is: *no ambient authority*. A subagent that wants to read a
-secret artifact cannot do so by virtue of "being the supervisor's
-subagent"; it must hold a grant whose predicate matches the artifact
-and whose `allowed_views` includes `raw`.
+== Provenance, audit logs, eval harnesses
 
-Two delegation properties from the capability literature carry over:
-*attenuation* — a supervisor can mint a grant strictly weaker than
-its own (narrower predicate, fewer ops, smaller budget) before
-handing it to the subagent — and *revocation by reference*. Our
-prototype supports the first via `create_grant` parameters; full
-revocation (a separate `revoked_at` column with FK check) is on the
-future-work list and is a small extension.
+`artifact_links` records `(source, target, relation, confidence)`
+where- and why-provenance in Buneman et al.'s (2001) sense; the
+vocabulary is a small fragment of W3C *PROV-DM* (Moreau et al., 2013).
+The artifact-access log is append-only but *not* cryptographically
+anchored — no Schneier-Kelsey hash chain or Merkle commitment.
+Tamper-evident hardening (a `prev_hash` column plus chain-verify
+verb) is on the future-work list and explicitly out of the threat
+model (§11.7). The eval treats the log as a *measurement surface*
+for RQ4 — counting denied rows under the §11.3 stress scenarios —
+which is the right framing under a trusted-runtime assumption.
 
-What is *not* a capability in the strict sense: the seeded
-`__supervisor__` grant is ambient (every supervisor process inherits
-it via `migrate()`). It exists for audit-log foreign-key resolution
-and is documented as a trusted-runtime concession in the threat
-model. A production deployment would mint per-session supervisor
-grants instead.
-
-== Information flow control and label-based access
-
-The `sensitivity_label` column and `sensitivity_max` predicate axis
-implement a simple linear lattice (`public(0) < internal(1) <
-restricted(2) < secret(3)`) over artifact-level labels. This is the
-Bell-LaPadula "no-read-up" rule (Bell & LaPadula, 1973) restricted to
-one axis. ArtifactStore is *not* a full information flow control (IFC)
-system in the *HiStar* (Zeldovich et al., 2006), *Asbestos* (Efstathopoulos
-et al., 2005), *Flume* (Krohn et al., 2007), or *LIO* (Stefan et al.,
-2011) sense: there is no taint propagation across reads, no implicit
-flow tracking, and no covert-channel bound. A subagent that legitimately
-reads a `restricted` artifact and then writes a `public` artifact derived
-from it is not constrained by the storage layer — the threat model
-explicitly delegates that to higher-level policy. Future work could add
-a coarse label-propagation rule at `put_artifact(parent_artifact_id=...)`
-time (child inherits `max(child.label, parent.label)`); the
-`artifact_links.derived_from` row already records the dependency, so
-this is a one-trigger change rather than a redesign.
-
-The W2 self-labeling-bypass defense (§11.7, threat model) is a write-
-time heuristic raise of a producer-claimed label, which has direct
-analogues in language-based IFC systems that distinguish *trusted* from
-*untrusted* code's right to lower labels (declassification predicates
-in JIF, Myers & Liskov, 1997). ArtifactStore disallows producer
-lowering entirely; the comparison is illustrative of where in the IFC
-design space the prototype sits.
-
-== Provenance databases and lineage
-
-The `artifact_links` table records *where-* and *why-* provenance in
-Buneman et al.'s (2001) sense: each row is a `(source, target,
-relation, confidence)` tuple, with `derived_from` written
-automatically by `put_artifact(parent_artifact_id=...)`. The relation
-vocabulary (`derived_from`, `caused_by`, `supersedes`) is a small
-fragment of the W3C *PROV-DM* (Moreau et al., 2013) ontology — PROV
-defines `wasDerivedFrom`, `wasGeneratedBy`, `wasInformedBy`,
-`wasAttributedTo` at the entity/activity/agent level. Future work
-could rename to PROV-aligned relations and export an RDF view of the
-links table for cross-system interop; the prototype keeps the
-vocabulary short for course-scale legibility.
-
-What ArtifactStore does *not* attempt: probabilistic lineage in the
-*Trio* (Widom, 2005) sense (confidence-weighted derivation tables),
-or the *Polygen* (Wang & Madnick, 1990) approach of carrying
-source-system identifiers through joins. Both are richer than
-`artifact_links` and could be layered on top; for the diagnostic-task
-workloads in §11, single-confidence `derived_from` was sufficient.
-
-== Row-level security and predicate-based grants
-
-The `artifact_predicate` JSON field — `session_id`, `artifact_types`,
-`sensitivity_max`, `path_prefixes` — is a row-level security (RLS)
-filter in the *Postgres RLS* (Postgres 9.5+, 2016), *Oracle VPD*
-(Virtual Private Database, since Oracle 8i), and *SQL Server FGAC*
-sense: each predicate evaluates against the candidate row and gates
-the read. The difference is the evaluation site: RLS systems push the
-predicate into the SQL query plan as a `WHERE` clause; ArtifactStore
-evaluates the JSON predicate in Python after a primary-key fetch.
-This is fine for prototype scale but is a known inefficiency vs
-true RLS — the trade is that JSON predicates are trivially extensible
-(new axis = one Python function) without a schema migration. A
-production version on Postgres or DuckDB could compile the predicate
-to a `WHERE` clause and inherit the planner's selectivity work.
-
-The `path_prefixes` axis is also closer to *column-level* security
-than row-level: it filters which spans of a permitted artifact are
-rendered, which is a per-cell decision once `artifact_spans` is
-joined to the predicate. SQL Server's *Dynamic Data Masking* (DDM)
-and Postgres' `SECURITY INVOKER` views are the nearest equivalents.
-
-== Secure audit logging
-
-The `artifact_access_log` table records `(grant_id, subject,
-artifact_id, op, view, allowed, denial_reason, ts)` for every read,
-allowed or denied. The append-only design is consistent with
-production audit-log practice but is *not* cryptographically anchored:
-there is no hash chain à la Schneier-Kelsey (1998, "Cryptographic
-support for secure logs on untrusted machines"), no Merkle-tree
-commitment, and no time-stamping authority. A privileged attacker
-with write access to the SQLite file can rewrite history. The threat
-model explicitly excludes file-level confidentiality (§11.7), and the
-same exclusion applies to log integrity. Hardening the log to
-*tamper-evident* (Crosby & Wallach, 2009) is a one-table extension
-(add a `prev_hash` column and a chain-verify CLI verb) and is on the
-future-work list.
-
-The eval (§8) treats the audit log as a *measurement surface* for
-RQ4 rather than as a security artifact: we count denied rows and
-their `denial_reason` strings to evaluate that the grant pipeline
-fires under the §11.3 stress scenarios. Even non-tamper-evident
-logs are useful as a measurement surface when the runtime is in the
-trust boundary (which we assume; §11.7).
-
-== Eval frameworks
-
-*Inspect AI*, *OpenAI Evals*, and *LangChain's evaluation utilities* are
-harnesses for measuring agent behavior. They orchestrate runs and
-collect metrics; they do not provide a typed, permission-scoped
-*store* for the tool outputs the agents produce. ArtifactStore could be
-used inside any of these as a substrate; conversely, a richer eval
-harness would subsume our `eval/driver.py`.
-
-== Retrieval-augmented agents
-
-*RAG systems* (e.g., Pinecone, Weaviate, LlamaIndex) provide semantic
-retrieval over a corpus. The access model is "any vector → any document"
-— there's no per-document type, no scoped grant, no audit log of who
-read what under which capability. ArtifactStore's evidence is *typed*
-(spans with importance, span_type, file_path) and *capability-scoped*
-(predicate + ops + views + budget + expiry). The two compose: a future
-extension could add an embedding index next to FTS5 for semantic span
-retrieval.
+Eval harnesses like *Inspect AI*, *OpenAI Evals*, and *LangChain*'s
+utilities orchestrate runs and collect metrics; they do not provide a
+typed, permission-scoped *store* for the tool outputs the agents
+produce, and ArtifactStore could be plugged into any of them as the
+underlying substrate.
 
 == DBMS analogies
 
