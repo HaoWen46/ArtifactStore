@@ -130,9 +130,12 @@ def demo(*, db: str, kind: str, target: str, model: str,
 
     # Echo the resolved provider config before we make any paid call. The user
     # can Ctrl-C if it's not what they expected — saves spend on misconfig.
-    resolved_base = base_url or os.environ.get("ANTHROPIC_BASE_URL") or "(SDK default — Anthropic)"
-    has_key = "yes" if os.environ.get("ANTHROPIC_API_KEY") else "NO (will fail)"
-    print(f"[runner] model={model} base_url={resolved_base} api_key={has_key}")
+    from demo.providers import describe
+    d = describe(model)
+    resolved_base = base_url or d["base_url"]
+    has_key = "yes" if d["key_present"] else f"NO — set {d['key_env']} (will fail)"
+    print(f"[runner] model={model} provider={d['provider']} "
+          f"base_url={resolved_base} api_key={has_key}")
 
     sup = Agent(
         name="supervisor",
@@ -252,9 +255,14 @@ def _verify_tool_choice(model: str, base_url: str | None) -> int:
          "description": "Say goodbye. Call this when leaving.",
          "input_schema": schema},
     ]
-    client_kwargs = {}
-    if base_url or os.environ.get("ANTHROPIC_BASE_URL"):
-        client_kwargs["base_url"] = base_url or os.environ["ANTHROPIC_BASE_URL"]
+    # Resolve credentials the same way the agent loop does, so the probe
+    # exercises the exact wiring an eval rep will see.
+    from demo.providers import resolve
+    api_key, default_base_url, _ = resolve(model)
+    resolved_base = base_url or default_base_url
+    client_kwargs = {"api_key": api_key}
+    if resolved_base:
+        client_kwargs["base_url"] = resolved_base
     client = Anthropic(**client_kwargs)
     print(f"[probe] {model} via {client.base_url} — forcing tool_choice=goodbye"
           f" while asking for hello ...")
@@ -305,18 +313,16 @@ def _check_config(model: str, base_url: str | None) -> int:
     """Print resolved provider config and construct (but don't call) an Agent.
     No network. Returns an exit code — 0 if the SDK accepted the config, 2 if
     something's missing. Use this before kicking off a paid run."""
-    from demo.agent import DEEPSEEK_BASE_URL, Agent, ModelConfig, Tool
-    resolved_base = (base_url
-                     or os.environ.get("ANTHROPIC_BASE_URL")
-                     or "(SDK default — Anthropic)")
-    has_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    from demo.agent import Agent, ModelConfig
+    from demo.providers import describe
+    d = describe(model)
+    resolved_base = base_url or d["base_url"]
     print(f"model       {model}")
+    print(f"provider    {d['provider']}")
     print(f"base_url    {resolved_base}")
-    print(f"api_key     {'set' if has_key else 'MISSING — runner will fail'}")
-    expected_provider = ("DeepSeek" if "deepseek" in str(resolved_base)
-                         else "Anthropic")
-    print(f"provider    {expected_provider}")
-    if not has_key:
+    print(f"key_env     {d['key_env']}")
+    print(f"api_key     {'set' if d['key_present'] else 'MISSING — runner will fail'}")
+    if not d["key_present"]:
         return 2
     # Construct the agent so the SDK validates the inputs. No request is sent.
     try:

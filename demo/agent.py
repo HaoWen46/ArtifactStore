@@ -105,17 +105,19 @@ class Agent:
         self.tools = tools
         self.config = config or ModelConfig()
         if client is None:
-            api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-            if not api_key:
+            # Resolve provider from the model name so a sweep can run
+            # `--model deepseek-v4-pro` and `--model qwen3.6-max` back to
+            # back without editing .env between runs. Caller-supplied
+            # base_url still wins over the provider default.
+            from demo.providers import resolve, ProviderError
+            try:
+                api_key, default_base_url, _ = resolve(self.config.model)
+            except ProviderError as exc:
                 raise RuntimeError(
-                    "ANTHROPIC_API_KEY is not set. The agent uses the `anthropic` "
-                    "Python SDK as the HTTP client; it works against both Anthropic "
-                    "and DeepSeek's Anthropic-compatible endpoint. Set "
-                    "ANTHROPIC_API_KEY to your provider key and (for DeepSeek) "
-                    "ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic. "
-                    "Tests should inject a client= stub."
-                )
-            base_url = self.config.base_url or os.environ.get("ANTHROPIC_BASE_URL")
+                    f"{exc} Tests should inject a client= stub instead of "
+                    "relying on env vars."
+                ) from exc
+            base_url = self.config.base_url or default_base_url
             client = (Anthropic(api_key=api_key, base_url=base_url)
                       if base_url else Anthropic(api_key=api_key))
         self.client = client

@@ -636,11 +636,15 @@ def run_eval(*, fixtures: list[str], strategies: list[str], reps: int,
     run_dir = output_root / f"delegation_{started.strftime('%Y-%m-%dT%H-%M-%SZ')}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
+    from demo.providers import describe
+    p_info = describe(model)
     config = {
         "mode": "delegation",
         "started_at": started.isoformat(),
         "model": model,
-        "base_url": os.environ.get("ANTHROPIC_BASE_URL") or "(SDK default)",
+        "provider": p_info["provider"],
+        "base_url": p_info["base_url"],
+        "key_env": p_info["key_env"],
         "git_rev": _git_rev(),
         "fixtures": fixtures,
         "strategies": strategies,
